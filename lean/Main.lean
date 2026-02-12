@@ -2,7 +2,16 @@ import Rbtree
 
 open RBTree Color Tree
 
-/-- Pretty-print a tree with indentation. -/
+/-! ## Runtime test suite
+
+These tests exercise the *executable* behavior of the red-black tree: membership,
+sorted output, duplicate handling, and balance under adversarial insertion orders.
+
+The *correctness* of the BST ordering is also verified at compile time by
+`isBST_insert` in `Rbtree/Basic.lean`, which proves that `insert` preserves the
+BST invariant for all inputs—not just the ones tested here. -/
+
+/-- Pretty-print a tree with indentation, showing color and value at each node. -/
 def ppTree [Repr α] : Tree α → String → String
   | leaf, indent => s!"{indent}·"
   | node c l v r, indent =>
@@ -47,7 +56,7 @@ def main : IO Unit := do
   check "¬contains 9" (!contains 9 t)
   IO.println ""
 
-  -- Sorted output
+  -- Sorted output (this is what isBST_insert guarantees at the type level)
   IO.println "── Ordering ──"
   let sorted := toList t
   check "toList is sorted" (sorted == [1, 2, 3, 4, 5, 6, 7, 8])
@@ -76,7 +85,7 @@ def main : IO Unit := do
   check "height ≤ 10" (height big ≤ 10)
   IO.println ""
 
-  -- Reverse-sorted insertion (worst case for naive BST)
+  -- Reverse-sorted insertion (worst case for naive BST, but RB trees stay balanced)
   IO.println "── Worst-case insertion order ──"
   let desc := fromList ((List.range 15).map (15 - ·))
   check "descending size = 15" (size desc == 15)
