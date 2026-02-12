@@ -1,0 +1,10 @@
+name = "rbtree"
+version = "0.1.0"
+defaultTargets = ["rbtree"]
+
+[[lean_lib]]
+name = "Rbtree"
+
+[[lean_exe]]
+name = "rbtree"
+root = "Main"
