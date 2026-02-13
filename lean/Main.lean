@@ -208,6 +208,94 @@ def run : IO Unit := do
 end DoubleBlackTests
 
 -- ══════════════════════════════════════════════════════════════════════
+-- Daedalus implementation tests
+-- ══════════════════════════════════════════════════════════════════════
+
+namespace DaedalusTests
+open RBTree.Daedalus Color Tree
+
+/-- Pretty-print a Daedalus tree with indentation. -/
+def ppTree [Repr α] [Repr β] : Tree α β → String → String
+  | empty, indent => s!"{indent}·"
+  | node c l k v r, indent =>
+    let color := match c with | red => "R" | black => "B"
+    let left := ppTree l (indent ++ "  ")
+    let right := ppTree r (indent ++ "  ")
+    s!"{indent}{color}({repr k}={repr v})\n{left}\n{right}"
+
+def run : IO Unit := do
+  IO.println "═══ Daedalus Red-Black Tree Tests ═══"
+  IO.println ""
+
+  -- Build a tree by inserting key-value pairs
+  let kvs : List (Nat × String) := [(5,"e"), (3,"c"), (7,"g"), (1,"a"), (4,"d"), (6,"f"), (8,"h"), (2,"b")]
+  let t := fromList kvs
+
+  IO.println "── Structure ──"
+  IO.println (ppTree t "  ")
+  IO.println ""
+
+  IO.println "── Stats ──"
+  IO.println s!"  size:  {size t}"
+  IO.println s!"  valid: {valid t}"
+  IO.println s!"  toList: {toList t}"
+  IO.println ""
+
+  -- Lookup tests
+  IO.println "── Lookup (findNode) ──"
+  check "findNode 1 = some \"a\"" (findNode 1 t == some "a")
+  check "findNode 5 = some \"e\"" (findNode 5 t == some "e")
+  check "findNode 8 = some \"h\"" (findNode 8 t == some "h")
+  check "findNode 0 = none" (findNode 0 t == none)
+  check "findNode 9 = none" (findNode 9 t == none)
+  IO.println ""
+
+  -- Sorted output (keys only)
+  IO.println "── Ordering ──"
+  let keys := (toList t).map Prod.fst
+  check "keys sorted" (keys == [1, 2, 3, 4, 5, 6, 7, 8])
+  IO.println ""
+
+  -- Value update on duplicate key
+  IO.println "── Value update on duplicate key ──"
+  let t2 := insert 5 "E_NEW" t
+  check "findNode 5 after update = some \"E_NEW\"" (findNode 5 t2 == some "E_NEW")
+  check "size unchanged after dup insert" (size t2 == size t)
+  IO.println ""
+
+  -- Validation
+  IO.println "── Invariant validation ──"
+  check "valid after insertions" (valid t)
+  check "valid after dup update" (valid t2)
+  let big := fromList ((List.range 20).map (fun i => (20 - i, i)))
+  check "valid: 20 reverse-order inserts" (valid big)
+  check "size: 20 inserts" (size big == 20)
+  IO.println ""
+
+  -- Empty tree
+  IO.println "── Edge cases ──"
+  let mt : Tree Nat String := empty
+  check "empty tree size = 0" (size mt == 0)
+  check "empty tree findNode = none" (findNode 42 mt == none)
+  check "single insert" ((toList (insert 42 "x" mt)).map Prod.fst == [42])
+  IO.println ""
+
+  -- Cross-implementation: key structure matches Classic
+  IO.println "── Cross-implementation: key agreement ──"
+  let classicKeys := RBTree.Classic.toList (RBTree.Classic.fromList [5, 3, 7, 1, 4, 6, 8, 2])
+  let daedalusKeys := (toList (fromList [(5,"e"), (3,"c"), (7,"g"), (1,"a"), (4,"d"), (6,"f"), (8,"h"), (2,"b")])).map Prod.fst
+  check "Classic.toList keys == Daedalus.toList keys" (classicKeys == daedalusKeys)
+
+  let bigClassic := RBTree.Classic.toList (RBTree.Classic.fromList
+    [10, 15, 5, 3, 12, 18, 1, 7, 14, 20, 2, 8, 6, 16, 4, 19, 11, 9, 13, 17])
+  let bigDaedalus := (toList (fromList
+    ((([10, 15, 5, 3, 12, 18, 1, 7, 14, 20, 2, 8, 6, 16, 4, 19, 11, 9, 13, 17] : List Nat).map (fun n => (n, n)))))).map Prod.fst
+  check "large tree: Classic keys == Daedalus keys" (bigClassic == bigDaedalus)
+  IO.println ""
+
+end DaedalusTests
+
+-- ══════════════════════════════════════════════════════════════════════
 -- Main
 -- ══════════════════════════════════════════════════════════════════════
 
@@ -215,4 +303,6 @@ def main : IO Unit := do
   ClassicTests.run
   IO.println ""
   DoubleBlackTests.run
+  IO.println ""
+  DaedalusTests.run
   IO.println "═══ All tests complete ═══"
