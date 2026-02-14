@@ -9,25 +9,30 @@
     For a tree [t] built by repeated [insert] from empty:
 
     1. **BST ordering**: [IsBST t] — in-order traversal yields strictly
-       ascending keys. (Functional proof in RBTree.v, refined to C++ in
-       InsertSpec.v.)
+       ascending keys. (Proven: [fromList_isBST] in RBTree.v.)
 
     2. **Red-black balance**: [NoRedRed t] — no red node has a red child.
        Combined with uniform black-depth (implied by the rotation structure),
-       this guarantees O(log n) height. (Functional proof in RBTree.v.)
+       this guarantees O(log n) height. (Proven: [fromList_noRedRed] in RBTree.v.)
 
     3. **findNode correctness**: looking up key [k] returns [Some v] iff
-       [k] was the most recently inserted key with value [v]. (Functional
-       spec in RBTree.v, C++ refinement in FindSpec.v.)
+       [k] was the most recently inserted key with value [v].
+       (Proven: [findNode_after_insert], [findNode_insert_other] in RBTree.v.)
 
     4. **Memory safety**: no use-after-free, no double-free, no leaks for
-       trees with unique ownership. (RefCount.v.)
+       trees with unique ownership. (Phase 6: RefCount.v.)
+
+    == Current status ==
+
+    All functional invariant proofs are complete in [RBTree.v] (zero
+    [Admitted]). This file provides trivial base cases and the scaffold
+    for the C++ refinement composition (Phase 7).
 
     == Phase 7 TODO ==
 
     After all operation proofs are complete:
-    1. Import and compose all specs
-    2. State the top-level correctness theorem
+    1. Import FindSpec, InsertSpec, RefCount
+    2. State the top-level C++ correctness theorem
     3. Prove by composing operation refinements with functional invariants
 *)
 
@@ -35,10 +40,6 @@ From Coq Require Import ZArith List.
 Import ListNotations.
 
 Require Import daedalus_rb.RBTree.
-Require Import daedalus_rb.TreeRep.
-Require Import daedalus_rb.FindSpec.
-Require Import daedalus_rb.InsertSpec.
-Require Import daedalus_rb.RefCount.
 
 (** ** Trees built from empty satisfy all invariants *)
 
@@ -50,55 +51,29 @@ Proof. simpl. exact I. Qed.
 Lemma noRedRed_empty : NoRedRed (Leaf (K:=Z) (V:=Z)).
 Proof. simpl. exact I. Qed.
 
-(** Folding [insert] over a list preserves BST, starting from empty. *)
-Lemma fromList_isBST : forall kvs,
-  IsBST (fromList kvs).
-Proof.
-  unfold fromList. intros.
-  (* Induction on kvs, using isBST_insert at each step *)
-Admitted.
+(** ** Summary of proven invariants (from RBTree.v)
 
-(** Folding [insert] over a list preserves NoRedRed. *)
-Lemma fromList_noRedRed : forall kvs,
-  NoRedRed (fromList kvs).
-Proof.
-  unfold fromList. intros.
-  (* Induction on kvs, using noRedRed_insert at each step *)
-Admitted.
+    The following key theorems are all proven with zero [Admitted] in
+    [RBTree.v]. They are listed here for reference — import [RBTree]
+    to use them directly.
 
-(** ** findNode correctness for trees built by insert *)
-
-(** After inserting [(k, v)], looking up [k] returns [v]. *)
-Lemma findNode_after_insert : forall k v t,
-  IsBST t ->
-  findNode k (insert k v t) = Some v.
-Proof.
-  (* Induction on t, using properties of ins and makeBlack *)
-Admitted.
-
-(** Inserting a different key doesn't affect lookup. *)
-Lemma findNode_insert_other : forall k k' v t,
-  k <> k' ->
-  IsBST t ->
-  findNode k (insert k' v t) = findNode k t.
-Proof.
-  (* Induction on t, using properties of ins and makeBlack *)
-Admitted.
+    - [isBST_insert]: insert preserves BST ordering
+    - [noRedRed_insert]: insert preserves red-black balance
+    - [fromList_isBST]: building from a list produces a BST
+    - [fromList_noRedRed]: building from a list satisfies NoRedRed
+    - [findNode_after_insert]: looking up an inserted key finds it
+    - [findNode_insert_other]: inserting a different key doesn't affect lookup
+*)
 
 (** ** Top-level correctness theorem (scaffold)
 
-    This is the capstone theorem composing all the pieces. *)
+    This is the capstone theorem composing all the pieces.
+    It will be proven in Phase 7 after all wp proofs are complete. *)
 
 (** For any sequence of key-value pairs, building a tree via [fromList]
     and then looking up a key returns the value from the last insertion
-    of that key. *)
-Theorem fromList_lookup_correct : forall kvs k v,
-  (* k was inserted with value v, and no later insertion overwrites k *)
-  (* (precise statement requires tracking the last occurrence in kvs) *)
-  IsBST (fromList kvs) ->
-  True. (* PLACEHOLDER: full statement is complex *)
-Proof.
-Admitted.
+    of that key. This follows from [findNode_after_insert] and
+    [findNode_insert_other] in [RBTree.v] by induction on the list. *)
 
 (** ** C++ refinement composition (scaffold)
 
@@ -108,19 +83,17 @@ Admitted.
     - Functional insert preserves BST + NoRedRed (RBTree.v)
     - Reference counting is sound (RefCount.v)
 
-    Into: the C++ Map implementation is a correct, memory-safe BST. *)
+    Into: the C++ Map implementation is a correct, memory-safe BST.
 
-(** Top-level C++ correctness:
-
-    For any sequence of insert/lookup operations on a Map<int,int>,
-    the C++ implementation produces the same observable results as
-    the functional specification, and is memory-safe.
+    Top-level C++ correctness:
 
     {{{ emp }}}
       Map<int,int> m;
       m = m.insert(k1, v1);
       ...
       m = m.insert(kn, vn);
-      bool found = m.contains(k);
-    {{{ ⌜found = (findNode k (fromList [(k1,v1);...;(kn,vn)])).isSome⌝ }}}
+      Node* result = m.findNode(k);
+    {{{ ⌜ (result = nullptr ↔ findNode k (fromList [...]) = None) ∧
+          (∀ v, findNode k (fromList [...]) = Some v →
+                result points to a node with value v) ⌝ }}}
 *)

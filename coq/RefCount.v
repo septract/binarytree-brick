@@ -16,107 +16,93 @@
 
     == Proof strategy: Iris ghost state ==
 
-    We use Iris fractional permissions (or a custom ghost state) to track
-    ownership tokens:
+    We use Iris ghost state (a custom CMRA) to track ownership tokens.
+    Each allocated node has an associated ghost name [γ] and a token
+    resource [own_token γ].
 
-    - [own_token p] represents one unit of ownership of node [p].
-      A node with ref_count = n has exactly n tokens outstanding.
-    - [copy(p)] produces a new token: [own_token p] ~~> [own_token p ** own_token p]
-      (conceptually; the ref_count is bumped by 1).
-    - [free(p)] consumes one token. If it was the last token (ref_count
-      was 1), the node is deallocated and children's tokens are consumed.
-    - [makeCopy(p)] consumes [own_token p] and produces [own_token p']
-      where [p'] has ref_count = 1 (unique ownership).
+    Invariants:
+
+    - [ref_inv γ p n]: "node [p] has physical ref_count = [n], and
+      there are exactly [n] ownership tokens [own_token γ] in
+      circulation."  This is an Iris invariant (in [iProp]).
+
+    - [copy(p)] produces a new token:
+        [own_token γ ={⊤}=∗ own_token γ ∗ own_token γ]
+      (ref_count is bumped by 1).
+
+    - [free(p)] consumes one token:
+        If ref_count was 1 (last token): node is deallocated,
+        children's tokens are returned.
+        If ref_count > 1: ref_count is decremented.
+
+    - [makeCopy(p)] consumes [own_token γ_old] and produces
+      [own_token γ_new] where the new node has ref_count = 1.
 
     == Phase 6 TODO ==
 
-    After Phase 5 (InsertSpec.v), implement using Iris ghost state:
-    1. Define the ghost state CMRA for ownership tokens
-    2. Define [ref_inv p n]: "node [p] has ref_count [n] and there are
-       [n] tokens for [p] in circulation"
+    After Phase 5 (InsertSpec.v):
+    1. Define the ghost state CMRA (e.g., [Auth (Excl nat)])
+    2. Define [ref_inv] as an Iris invariant using [treeR] and ghost state
     3. Prove [copy_spec], [free_spec], [makeCopy_spec]
+    4. Prove key lemma: [insert] produces no leaks (unique ownership out)
+    5. Prove key lemma: [free] on a unique tree deallocates everything
 *)
 
 From Coq Require Import ZArith.
 
+Require Import skylabs.lang.cpp.cpp.
+Import cQp_compat.
+
 Require Import daedalus_rb.RBTree.
 Require Import daedalus_rb.TreeRep.
 
-(** ** Ownership token (scaffold)
+Section with_Sigma.
+Context `{Sigma : cpp_logic} {CU : genv}.
 
-    In the full Iris proof, this would be a ghost resource.
-    For now, we define it at the Prop level. *)
+(** ** Hoare triple specifications
 
-(** An ownership token for a node at address [p].
-    In the real proof, this is an Iris ghost assertion. *)
-Definition own_token (p : val) : Prop := p <> 0%Z.  (* PLACEHOLDER *)
+    These require Iris ghost state definitions. The ghost state CMRA
+    and [ref_inv] invariant will be defined here once the basic
+    operation proofs (FindSpec, InsertSpec) are complete. *)
 
-(** ** Reference count invariant (scaffold)
+(** *** copy
 
-    Links the physical ref_count field to the number of outstanding tokens. *)
-
-(** [ref_inv p n] asserts: node [p] has ref_count = [n], and there are
-    exactly [n] ownership tokens for [p] in circulation.
-
-    This is the key invariant maintained by copy/free. *)
-Definition ref_inv (p : val) (n : nat) : Prop :=
-  p <> 0%Z /\ n >= 1.  (* PLACEHOLDER: real version uses ghost state *)
-
-(** ** Specification scaffolds *)
-
-(** copy specification:
-
-    {{{ own_token p ** ref_inv p n }}}
+    {{{ p |-> treeR q t ** ref_inv γ p n }}}
       Node::copy(p)
-    {{{ own_token p ** own_token p ** ref_inv p (S n) }}}
+    {{{ p |-> treeR q t ** ref_inv γ p (S n) **
+        own_token γ }}}
 
-    Produces a new token. The ref_count is incremented. *)
+    Produces a new ownership token. The ref_count is incremented. *)
 
-(** free specification:
+(** *** free
 
-    {{{ own_token p ** ref_inv p n }}}
+    {{{ own_token γ ** ref_inv γ p n }}}
       Node::free(p)
     {{{ if n = 1:
           (* Last reference: node is deallocated *)
-          own_token(left) ** own_token(right) ** freed(p)
+          children's tokens returned, node freed
         else:
           (* Not last: just decrement *)
-          ref_inv p (n-1) }}}
+          ref_inv γ p (n-1) }}} *)
 
-    Consumes one token. If last, deallocates and yields children's tokens. *)
+(** *** makeCopy (ghost state version)
 
-(** makeCopy specification:
-
-    {{{ own_token p ** tree_rep t p }}}
+    {{{ own_token γ_old ** p |-> treeR 1 t }}}
       makeCopy(p)
-    {{{ p', own_token p' ** tree_rep t p' ** ⌜ref_count(p') = 1⌝ }}}
+    {{{ p', own_token γ_new ** p' |-> treeR 1 t }}}
 
     Consumes one token for [p], produces a unique token for [p'].
-    If [p] was already unique (ref_count = 1), then [p' = p].
-    Otherwise, [p'] is a fresh allocation. *)
+    If [p] was already unique (ref_count = 1), then [p' = p] and
+    [γ_new = γ_old]. Otherwise, [p'] is a fresh allocation. *)
 
-(** ** Key lemma: insert produces no leaks
+(** ** Key composition lemma
 
-    After [insert(k, v, p)], the returned tree's ref_count structure
-    is consistent: every internal node has ref_count = 1 (unique
-    ownership from the caller's perspective), and any shared subtrees
-    from the original tree have their ref_counts correctly adjusted. *)
-Lemma insert_no_leak : forall k v t p,
-  (* Assuming well-formed initial tree *)
-  tree_rep_spec t p ->
-  (* insert consumes ownership of p and produces a new tree *)
-  True.  (* PLACEHOLDER: full statement requires ghost state *)
-Proof.
-Admitted.
+    After [insert(k, v, p)], the returned tree has consistent
+    ref_count structure: the root has ref_count = 1 (unique ownership
+    from the caller's perspective), and shared subtrees from the
+    original tree have correctly adjusted ref_counts.
 
-(** ** Key lemma: free deallocates the entire tree
+    This composes [ins_spec] (from InsertSpec.v) with [makeCopy_spec]
+    to show the overall reference counting discipline is sound. *)
 
-    [free(p)] on a tree where every node has ref_count = 1
-    deallocates every node. *)
-Lemma free_unique_tree : forall t p,
-  tree_rep_spec t p ->
-  (* All nodes have ref_count = 1 *)
-  (* After free(p), all nodes are deallocated *)
-  True.  (* PLACEHOLDER *)
-Proof.
-Admitted.
+End with_Sigma.

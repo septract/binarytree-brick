@@ -111,4 +111,26 @@ Fixpoint treeR (q : Qp) (t : tree Z Z) : Rep :=
                   _right     |-> ptrR<_Node> q rp)
     end).
 
+(** ** Characterization lemmas
+
+    Definitional unfoldings of [treeR] — useful for rewriting in
+    separation logic proofs without manual [simpl]/[unfold]. *)
+
+Lemma treeR_leaf q : treeR q Leaf = as_Rep (fun p => [| p = nullptr |]).
+Proof. reflexivity. Qed.
+
+Lemma treeR_node q c l k v r :
+  treeR q (Node c l k v r) =
+  as_Rep (fun this =>
+    Exists (lp : ptr) (rp : ptr) (rc : Z),
+    lp |-> treeR q l **
+    rp |-> treeR q r **
+    this |-> (_ref_count |-> ulongR q rc **
+              _color     |-> boolR q (color_to_bool c) **
+              _key       |-> intR q k **
+              _value     |-> intR q v **
+              _left      |-> ptrR<_Node> q lp **
+              _right     |-> ptrR<_Node> q rp)).
+Proof. reflexivity. Qed.
+
 End with_Sigma.
