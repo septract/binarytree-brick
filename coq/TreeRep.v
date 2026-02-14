@@ -1,14 +1,10 @@
 (** * Separation Logic Representation Predicate
 
     Links the Coq [tree Z Z] type from [RBTree.v] to the C++ [Node] heap
-    layout in the cpp2v-generated deep embedding.
+    layout using BRiCk's separation logic framework.
 
-    The predicate [tree_rep] states: "the C++ pointer [p] points to a heap
+    The predicate [treeR] states: "the C++ pointer [p] points to a heap
     region whose shape and contents match the abstract tree [t]."
-
-    This file is a scaffold. The actual field names and types will be filled
-    in after inspecting the cpp2v-generated [map_int_int_cpp_names.v], which
-    contains the mangled C++ symbol table.
 
     == Design ==
 
@@ -16,48 +12,65 @@
     [wp_*] tactics discharge Hoare triples over these terms. To connect
     the C++ execution to our functional spec, we define:
 
-      tree_rep : tree Z Z -> val -> iProp
+      treeR : Qp -> tree Z Z -> Rep
 
-    where [val] is BRiCk's type for C++ values (pointers, integers, etc.)
-    and [iProp] is the Iris separation logic proposition type.
+    where [Rep] is BRiCk's representation predicate type (a monadic
+    predicate indexed by [ptr]), and [Qp] is the fractional permission.
 
     The key clauses are:
 
-    - [Leaf] ↔ the C++ pointer is null.
+    - [Leaf] ↔ the C++ pointer is [nullptr].
     - [Node c l k v r] ↔ the pointer is non-null and points to an
-      allocated struct with fields [ref_count], [color], [key], [value],
-      [left], [right] whose values match [c], [k], [v] and whose [left]
-      and [right] pointers recursively satisfy [tree_rep l] and [tree_rep r].
+      allocated [DDL::Map<int,int>::Node] struct whose fields match
+      [c], [k], [v] and whose [left]/[right] pointers recursively
+      satisfy [treeR].
 
-    == Phase 3 TODO ==
+    == Field layout (from cpp2v-generated [map_int_int_cpp_names.v]) ==
 
-    After running cpp2v (Phase 1), inspect [map_int_int_cpp_names.v] for:
-    - The mangled struct name for [DDL::Map<int,int>::Node]
-    - Field offset/name constants for [ref_count], [color], [key], etc.
-    - The BRiCk representation of [bool] (for color) and [int]
+    The C++ [Node] struct has these fields:
+    - [ref_count : size_t]  (reference count, [Tulong])
+    - [color : bool]        (red=true, black=false, [Tbool])
+    - [key : int]           ([Tint])
+    - [value : int]         ([Tint])
+    - [left : Node*]        (pointer to Node)
+    - [right : Node*]       (pointer to Node)
 
-    Then replace the [Admitted] placeholders below with proper definitions.
+    == Pattern ==
+
+    Following BRiCk's [treeR] pattern from [howto_sequential.v]:
+    leaf → [| this = nullptr |];
+    node → Exists child pointers, recursive treeR ** field assertions.
 *)
 
-From Coq Require Import ZArith.
-(* After setup, uncomment:
-From bedrock.lang.cpp Require Import semantics logic.
-From bedrock.lang.cpp.logic Require Import wp.
-From iris.proofmode Require Import proofmode.
-*)
+Require Import skylabs.lang.cpp.cpp.
+Import cQp_compat.
 
 Require Import daedalus_rb.RBTree.
 
-(** ** Placeholder types
+#[local] Set Warnings "-non-recursive".  (* treeR is not structurally recursive on Rep *)
+#[local] Open Scope Z_scope.
+#[local] Open Scope bs_scope.
 
-    These will be replaced by BRiCk's actual types once the generated
-    AST is available and the BRiCk Coq libraries are importable. *)
+Section with_Sigma.
+Context `{Sigma : cpp_logic} {CU : genv}.
 
-(* Placeholder for BRiCk's C++ value type *)
-Definition val : Type := Z.  (* PLACEHOLDER: replace with bedrock val *)
+(** ** C++ name bindings
 
-(* Placeholder for Iris iProp *)
-Definition iProp : Type := Prop.  (* PLACEHOLDER: replace with iPropI Σ *)
+    Field names from the cpp2v-generated [map_int_int_cpp_names.v].
+    The struct is [DDL::Map<int,int>::Node]. *)
+
+(** The [Node] struct type (for pointer representations). *)
+Definition _Node : type :=
+  Tnamed (Nscoped (Ninst (Nscoped (Nglobal (Nid "DDL")) (Nid "Map"))
+            ((Atype Tint) :: (Atype Tint) :: nil)) (Nid "Node")).
+
+(** Field offsets within [Node]. *)
+Definition _ref_count := _field "DDL::Map<int,int>::Node::ref_count".
+Definition _color     := _field "DDL::Map<int,int>::Node::color".
+Definition _key       := _field "DDL::Map<int,int>::Node::key".
+Definition _value     := _field "DDL::Map<int,int>::Node::value".
+Definition _left      := _field "DDL::Map<int,int>::Node::left".
+Definition _right     := _field "DDL::Map<int,int>::Node::right".
 
 (** ** Color encoding
 
@@ -68,41 +81,34 @@ Definition color_to_bool (c : Color) : bool :=
   | Black => false
   end.
 
-(** ** Representation predicate (scaffold)
+(** ** Representation predicate
 
-    The real definition will use BRiCk's [_at] points-to assertions and
-    Iris separating conjunction [∗]. For now we state the intended shape
-    as a Prop-level specification. *)
+    [treeR q t] asserts that the "this" pointer represents abstract tree [t]
+    with fractional permission [q].
 
-(** [tree_rep t p] asserts that C++ pointer [p] represents abstract tree [t].
+    - [Leaf] maps to [nullptr].
+    - [Node c l k v r] maps to a non-null pointer to an allocated
+      [DDL::Map<int,int>::Node] struct. We existentially quantify
+      over the child pointers [lp] and [rp], assert the field
+      contents, and recurse into the subtrees.
 
-    - [Leaf] maps to the null pointer.
-    - [Node c l k v r] maps to a non-null pointer to an allocated struct
-      whose fields match [c], [k], [v] and whose children recursively
-      satisfy [tree_rep]. *)
-Fixpoint tree_rep_spec (t : tree Z Z) (p : val) : Prop :=
-  match t with
-  | Leaf =>
-      (* Null pointer *)
-      p = 0%Z
-  | Node c l k v r =>
-      (* Non-null pointer to an allocated Node *)
-      p <> 0%Z
-      (* TODO: replace with separation logic points-to assertions:
-         p |-> { ref_count : _, color : color_to_bool c,
-                 key : k, value : v, left : pl, right : pr }
-         ** tree_rep l pl
-         ** tree_rep r pr *)
-  end.
+    The [ref_count] field is existentially quantified since it is a
+    runtime bookkeeping value not tracked by the functional spec. *)
+Fixpoint treeR (q : Qp) (t : tree Z Z) : Rep :=
+  as_Rep (fun this =>
+    match t with
+    | Leaf =>
+        [| this = nullptr |]
+    | Node c l k v r =>
+        Exists (lp : ptr) (rp : ptr) (rc : Z),
+        lp |-> treeR q l **
+        rp |-> treeR q r **
+        this |-> (_ref_count |-> ulongR q rc **
+                  _color     |-> boolR q (color_to_bool c) **
+                  _key       |-> intR q k **
+                  _value     |-> intR q v **
+                  _left      |-> ptrR<_Node> q lp **
+                  _right     |-> ptrR<_Node> q rp)
+    end).
 
-(** ** Basic lemmas (scaffold) *)
-
-(** A Leaf is represented only by the null pointer. *)
-Lemma tree_rep_leaf_null : forall p,
-  tree_rep_spec Leaf p -> p = 0%Z.
-Proof. intros p H. exact H. Qed.
-
-(** A Node is never represented by the null pointer. *)
-Lemma tree_rep_node_nonnull : forall c l k v r p,
-  tree_rep_spec (Node c l k v r) p -> p <> 0%Z.
-Proof. intros. simpl in H. exact H. Qed.
+End with_Sigma.

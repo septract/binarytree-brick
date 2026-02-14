@@ -11,12 +11,44 @@ framework for formally verifying C++ code. It uses **cpp2v** to translate
 Clang's fully-elaborated AST into a Coq deep embedding, then proves
 correctness via Hoare triples in the **Iris** framework.
 
+## Installation
+
+BRiCk uses the [SkylabsAI/workspace](https://github.com/SkylabsAI/workspace)
+meta-repo to manage all dependencies (Rocq, Iris, stdpp, cpp2v, etc.) with
+correct version pinning. **Do not install dependencies manually via opam.**
+
+```bash
+git clone https://github.com/SkylabsAI/workspace.git .brick-workspace
+cd .brick-workspace
+make clone-public -j       # Clone BRiCk + public dependencies
+make dev-setup             # Create opam switch with pinned versions
+make update-opam-deps      # Install all dependencies
+make -j$(nproc) stage1     # Build ASTs
+dune build                 # Build everything (cpp2v + Coq theories)
+```
+
+After setup, the workspace layout is:
+```
+.brick-workspace/
+├── fmdeps/BRiCk/          # BRiCk repo (theories, cpp2v, etc.)
+├── vendored/rocq/         # Vendored Rocq/Coq
+├── dev/opam-deps/         # Pinned dependency versions
+└── _build/install/default/bin/cpp2v   # Built cpp2v binary
+```
+
+To use cpp2v from the workspace:
+```bash
+source .brick-workspace/dev/activate.sh   # Activate the environment
+cpp2v -v -names output_names.v -o output_cpp.v input.cpp -- -std=c++17 -I.
+```
+
 ## External Resources
 
 - **BRiCk repo**: https://github.com/bedrocksystems/BRiCk
-  - [README](https://github.com/bedrocksystems/BRiCk/blob/master/README.md) — build instructions, repo layout
+  - [README](https://github.com/bedrocksystems/BRiCk/blob/master/README.md) — repo layout
   - [`howto_sequential.v`](https://github.com/bedrocksystems/BRiCk/blob/master/rocq-skylabs-brick/theories/noimport/doc/cpp/howto_sequential.v) — best tutorial: Range, Tree, BST, linked list reps + specs
   - [`theories/lang/cpp/`](https://github.com/bedrocksystems/BRiCk/tree/master/rocq-skylabs-brick/theories/lang/cpp) — core theory files (rep, primitives, logic, semantics)
+- **Workspace meta-repo**: https://github.com/SkylabsAI/workspace — official build/install method
 - **Paper**: [Towards an Axiomatic Basis for C++](https://gmalecha.github.io/publications/2020/towards-an-axiomatic-basis-for-c++) (Malecha, Anand, Stewart — Coq Workshop 2020)
 - **Iris framework**: https://iris-project.org/
   - [Iris tutorial (POPL'21)](https://gitlab.mpi-sws.org/iris/tutorial-popl21) — learn IPM proof mode
@@ -108,7 +140,8 @@ For the full API reference, see [api-reference.md](api-reference.md).
 
 ## Version Compatibility
 
-BRiCk Coq theories require version alignment between `rocq-skylabs-prelude`
-and `coq-stdpp` (Iris stdpp). When building from source, pin to matching
-commits. The `elem_of_list_bind` API is a known breakage point between
-stdpp versions.
+BRiCk's dependency chain (Rocq, Iris, stdpp, elpi, equations, etc.) requires
+precise version alignment. **Always use the workspace meta-repo** — it manages
+all version pins via `dev/opam-deps/skylabs-deps.opam`. Manual opam installs
+will hit version conflicts (e.g., stdpp 1.12.0 renamed `elem_of_list_X` to
+`list_elem_of_X`, breaking BRiCk code written for stdpp 1.11.0).

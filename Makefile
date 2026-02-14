@@ -1,36 +1,41 @@
 # BRiCk verification of Daedalus RB tree (ddl/map.h).
 #
 # Targets:
-#   make setup       - Install Coq + Iris (opam) and build cpp2v from source
-#   make setup-coq   - Just the opam switch (Coq + Iris)
-#   make setup-cpp2v - Just the cpp2v binary (cmake + LLVM)
+#   make proofs      - Build all Coq proofs
 #   make cpp2v       - Run cpp2v to generate Coq AST from C++
-#   make proofs      - Build all Coq proofs (requires generated .v files)
 #   make status      - Check toolchain installation status
 #   make clean       - Remove generated files
-#   make clean-all   - Also remove cloned BRiCk source
 #   make all         - cpp2v + proofs
 #
 # Prerequisites:
-#   opam (>= 2.1), Homebrew llvm (for cpp2v build), cmake
+#   The BRiCk workspace must be built first:
+#     cd .brick-workspace && make clone-public -j && make dev-setup
+#     make update-opam-deps && dune build
 #
-# First-time setup:
-#   make setup    # ~20 min total
+#   Then activate before running this Makefile:
+#     source .brick-workspace/dev/activate.sh
 
-# Homebrew LLVM (cpp2v links against libclang)
-LLVM_PREFIX := $(shell brew --prefix llvm 2>/dev/null)
+# ---- Workspace paths ----
 
-# cpp2v source (cloned during setup)
-CPP2V_REPO  := https://github.com/bedrocksystems/BRiCk.git
-CPP2V_SRC   := .brick-src
-CPP2V_BIN   := $(CPP2V_SRC)/rocq-skylabs-cpp2v/build/cpp2v
+WORKSPACE := .brick-workspace
+WS_BUILD  := $(WORKSPACE)/_build/install/default
+
+# coqc from the workspace dune build
+COQC      := $(WS_BUILD)/bin/coqc
+COQLIB    := $(WS_BUILD)/lib/coq
+COQDEP    := $(WS_BUILD)/bin/coqdep
+
+# cpp2v from the workspace dune build
+CPP2V     := $(WS_BUILD)/bin/cpp2v
+
+# ---- Project files ----
 
 SRC       := src/map_int_int.cpp
 COQ_DIR   := coq
 GEN_AST   := $(COQ_DIR)/map_int_int_cpp.v
 GEN_NAMES := $(COQ_DIR)/map_int_int_cpp_names.v
 
-# Coq source files (hand-written)
+# Coq source files (order matters for dependency chain)
 COQ_SRCS := $(COQ_DIR)/RBTree.v \
             $(COQ_DIR)/TreeRep.v \
             $(COQ_DIR)/FindSpec.v \
@@ -38,61 +43,12 @@ COQ_SRCS := $(COQ_DIR)/RBTree.v \
             $(COQ_DIR)/RefCount.v \
             $(COQ_DIR)/Invariants.v
 
-.PHONY: all setup setup-coq setup-cpp2v cpp2v proofs clean clean-all check-env status
+# Common flags: set COQLIB and the -R mapping for our project
+COQFLAGS := -coqlib $(COQLIB) -R $(COQ_DIR) daedalus_rb
+
+.PHONY: all proofs cpp2v clean status
 
 all: cpp2v proofs
-
-# ---- Environment check ----
-
-check-env:
-	@command -v opam >/dev/null 2>&1 || (echo "ERROR: opam not found. Install with: brew install opam" && exit 1)
-	@test -n "$(LLVM_PREFIX)" || (echo "ERROR: Homebrew llvm not found. Install with: brew install llvm" && exit 1)
-	@command -v cmake >/dev/null 2>&1 || (echo "ERROR: cmake not found. Install with: brew install cmake" && exit 1)
-	@echo "opam:  $$(opam --version)"
-	@echo "llvm:  $(LLVM_PREFIX)"
-	@echo "cmake: $$(cmake --version | head -1)"
-
-# ---- Setup ----
-
-setup: setup-cpp2v setup-coq
-	@echo ""
-	@echo "=== Setup complete ==="
-	@echo "cpp2v: $(CPP2V_BIN)"
-	@echo "Coq:   eval \$$(opam env --switch=brick) && coqc --version"
-
-# Step 1: Build cpp2v from source via cmake.
-# cpp2v is a C++ binary that links against LLVM/Clang.
-# We build it directly rather than going through opam/dune because
-# the BRiCk monorepo's dune build has complex cross-package deps.
-setup-cpp2v: check-env
-	@if [ -x "$(CPP2V_BIN)" ]; then \
-	  echo "cpp2v already built at $(CPP2V_BIN)"; \
-	else \
-	  echo "=== Cloning BRiCk repo ===" && \
-	  git clone --depth 1 $(CPP2V_REPO) $(CPP2V_SRC) && \
-	  echo "=== Building cpp2v ===" && \
-	  cd $(CPP2V_SRC)/rocq-skylabs-cpp2v && \
-	  cmake -B build \
-	    -DCMAKE_BUILD_TYPE=Release \
-	    -DCMAKE_PREFIX_PATH="$(LLVM_PREFIX)" \
-	    -DClang_DIR="$(LLVM_PREFIX)/lib/cmake/clang" \
-	    -DLLVM_DIR="$(LLVM_PREFIX)/lib/cmake/llvm" && \
-	  make -C build -j$$(sysctl -n hw.ncpu) cpp2v && \
-	  echo "cpp2v built: $$(pwd)/build/cpp2v"; \
-	fi
-
-# Step 2: Create opam switch with Coq, Iris, and BRiCk Coq theories.
-# The 'brick' switch already exists from the failed attempt; reuse it.
-setup-coq: check-env
-	opam switch create brick 5.1.1 2>/dev/null || true
-	eval $$(opam env --switch=brick) && \
-	opam repo add --dont-select coq-released https://coq.inria.fr/opam/released 2>/dev/null || true && \
-	opam repo add --dont-select iris-dev https://gitlab.mpi-sws.org/iris/opam.git 2>/dev/null || true && \
-	opam repo add --this-switch coq-released 2>/dev/null || true && \
-	opam repo add --this-switch iris-dev 2>/dev/null || true && \
-	opam install coq coq-iris --yes
-	@echo ""
-	@echo "Coq switch ready. Activate with: eval \$$(opam env --switch=brick)"
 
 # ---- cpp2v translation ----
 
@@ -100,46 +56,65 @@ setup-coq: check-env
 cpp2v: $(GEN_AST)
 
 $(GEN_AST): $(SRC) ddl/map.h ddl/boxed.h ddl/size.h ddl/maybe.h ddl/debug.h
-	$(CPP2V_BIN) -v \
+	$(CPP2V) -v \
 	  -names $(GEN_NAMES) \
 	  -o $(GEN_AST) \
 	  $(SRC) -- -std=c++17 -I.
 
 # ---- Coq proofs ----
 
-# Build all Coq files using the _CoqProject file.
-# Requires the generated AST files to exist first.
-proofs: $(GEN_AST)
-	eval $$(opam env --switch=brick) && \
-	cd $(COQ_DIR) && coq_makefile -f _CoqProject -o Makefile.coq && \
-	$(MAKE) -f Makefile.coq
+# Build all .vo files. Dependencies are listed explicitly so Make
+# can parallelise correctly.
+
+# Generated files have no inter-dependency (compiled independently).
+$(COQ_DIR)/map_int_int_cpp_names.vo: $(COQ_DIR)/map_int_int_cpp_names.v
+	$(COQC) $(COQFLAGS) $<
+
+$(COQ_DIR)/map_int_int_cpp.vo: $(COQ_DIR)/map_int_int_cpp.v $(COQ_DIR)/map_int_int_cpp_names.vo
+	$(COQC) $(COQFLAGS) $<
+
+# Hand-written proof files.
+$(COQ_DIR)/RBTree.vo: $(COQ_DIR)/RBTree.v
+	$(COQC) $(COQFLAGS) $<
+
+$(COQ_DIR)/TreeRep.vo: $(COQ_DIR)/TreeRep.v $(COQ_DIR)/RBTree.vo
+	$(COQC) $(COQFLAGS) $<
+
+$(COQ_DIR)/FindSpec.vo: $(COQ_DIR)/FindSpec.v $(COQ_DIR)/RBTree.vo $(COQ_DIR)/TreeRep.vo $(COQ_DIR)/map_int_int_cpp.vo
+	$(COQC) $(COQFLAGS) $<
+
+$(COQ_DIR)/InsertSpec.vo: $(COQ_DIR)/InsertSpec.v $(COQ_DIR)/RBTree.vo $(COQ_DIR)/TreeRep.vo $(COQ_DIR)/map_int_int_cpp.vo
+	$(COQC) $(COQFLAGS) $<
+
+$(COQ_DIR)/RefCount.vo: $(COQ_DIR)/RefCount.v $(COQ_DIR)/RBTree.vo $(COQ_DIR)/TreeRep.vo $(COQ_DIR)/map_int_int_cpp.vo
+	$(COQC) $(COQFLAGS) $<
+
+$(COQ_DIR)/Invariants.vo: $(COQ_DIR)/Invariants.v $(COQ_DIR)/RBTree.vo $(COQ_DIR)/TreeRep.vo
+	$(COQC) $(COQFLAGS) $<
+
+proofs: $(COQ_DIR)/RBTree.vo $(COQ_DIR)/TreeRep.vo
 
 # ---- Cleanup ----
 
 clean:
-	rm -f $(GEN_AST) $(GEN_NAMES)
-	rm -f $(COQ_DIR)/Makefile.coq $(COQ_DIR)/Makefile.coq.conf $(COQ_DIR)/.Makefile.coq.d
 	rm -f $(COQ_DIR)/*.vo $(COQ_DIR)/*.vok $(COQ_DIR)/*.vos $(COQ_DIR)/*.glob $(COQ_DIR)/.*.aux
-
-clean-all: clean
-	rm -rf $(CPP2V_SRC)
 
 # ---- Status ----
 
-# Quick check that the toolchain is working.
 status:
-	@echo "--- cpp2v ---"
-	@if [ -x "$(CPP2V_BIN)" ]; then \
-	  $(CPP2V_BIN) --version 2>&1; \
+	@echo "--- coqc ---"
+	@if [ -x "$(COQC)" ]; then \
+	  $(COQC) -coqlib $(COQLIB) --version; \
 	else \
-	  echo "NOT INSTALLED (run: make setup-cpp2v)"; \
+	  echo "NOT FOUND at $(COQC)"; \
+	  echo "Build the workspace first: cd $(WORKSPACE) && dune build"; \
 	fi
 	@echo ""
-	@echo "--- Coq ---"
-	@if eval $$(opam env --switch=brick 2>/dev/null) && command -v coqc >/dev/null 2>&1; then \
-	  eval $$(opam env --switch=brick) && coqc --version; \
+	@echo "--- cpp2v ---"
+	@if [ -x "$(CPP2V)" ]; then \
+	  $(CPP2V) --version 2>&1 || echo "(version check not supported)"; \
 	else \
-	  echo "NOT INSTALLED (run: make setup-coq)"; \
+	  echo "NOT FOUND at $(CPP2V)"; \
 	fi
 	@echo ""
 	@echo "--- Generated AST ---"
@@ -149,3 +124,13 @@ status:
 	else \
 	  echo "NOT GENERATED (run: make cpp2v)"; \
 	fi
+	@echo ""
+	@echo "--- Proof status ---"
+	@for f in $(COQ_SRCS); do \
+	  vo=$${f%.v}.vo; \
+	  if [ -f "$$vo" ]; then \
+	    echo "  ✓ $$f"; \
+	  else \
+	    echo "  ✗ $$f (not compiled)"; \
+	  fi; \
+	done
