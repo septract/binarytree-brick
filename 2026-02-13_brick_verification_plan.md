@@ -1,7 +1,7 @@
 # BRiCk Verification Plan for Daedalus Red-Black Tree
 
 *Created: 2026-02-13*
-*Updated: 2026-02-14 — Phases 2-3 complete, Phase 4 in progress*
+*Updated: 2026-02-14 — Phases 2-4 substantially complete (spec registered, proof scaffold with loop invariant, Aborted at loop body)*
 
 ## Motivation
 
@@ -155,11 +155,20 @@ establish the functional spec is correct. We:
 - [x] Clean up scaffold files: remove duplicated Admitted lemmas, add BRiCk imports
 - [x] Invariants.v now compiles (removed dependency on unbuilt scaffold files)
 
-### Phase 4: FindNode Proof (in progress)
+### Phase 4: FindNode Proof (substantially complete, 2026-02-14)
 - [x] Write `findNode_spec` as BRiCk `SFunction` specification in FindSpec.v
 - [x] Document loop invariant and wp proof strategy
-- [ ] Complete wp proof using `wp_while_inv` with Löb induction
-- [ ] Discharge loop body steps (field loads, comparisons, pointer updates)
+- [x] Switch to `cpp.spec` registration (resolves against cpp2v AST)
+- [x] Add `ast` Makefile target for compiling the 96K-line generated AST
+- [x] Add `map_int_int_cpp.vo` as dependency for `FindSpec.vo`
+- [x] Import `prelude.spec` + `prelude.proof` for full BRiCk automation
+- [x] Add `#[only(lazy_unfold)] derive treeR.` for automation unfold hints
+- [x] Add `treeR_null` / `treeR_null_F` forwarding hint (`Admitted` — needs `structR` investigation)
+- [x] Add `smash_delayed_case_no_join_B` hint for if/else branch splitting
+- [x] Write `findNode_ok` proof scaffold with `verify_spec'; go.` + `wp_while`
+- [x] Design magic-wand loop invariant (zipper pattern for tree traversal)
+- [ ] Complete loop body proof (currently `Abort`ed — matches BRiCk demo state of the art)
+- [ ] Prove `treeR_null` (may need `structR _Node q` in `treeR`'s Node case)
 
 ### Phase 5: Insert Proof
 - [ ] Prove `makeCopy_spec`
@@ -184,6 +193,11 @@ establish the functional spec is correct. We:
 | cpp2v chokes on `operator<<` / `<iostream>` | **Resolved** | cpp2v emits warnings for atomics/NEON but produces correct output |
 | BRiCk Coq theories incompatible with generated AST | **Resolved** | Workspace builds matching coqc + theories; TreeRep.v compiles |
 | macOS Bash/sed incompatibility | **Resolved** | `brew install bash gnu-sed` for Bash 4.2+ and GNU sed |
+| `cpp.spec` name string for templated class method | Open | String `"DDL::Map<int, int>::Node::findNode(...)"` derived from AST; may need format adjustment |
+| `treeR_null` proof needs null-pointer reasoning | Open | `treeR` lacks `structR _Node`; may need to add it or use manual iDestruct |
+| `derive treeR` on a Fixpoint | Open | May not work; fallback is manual `rewrite treeR_node` / `treeR_leaf` |
+| AST compilation time (~30-60 min) | Open | Separate `make ast` target; run once, then iterate on proofs |
+| Loop proof requires deep BRiCk expertise | Open | `Abort`ed (matches BRiCk demo state); invariant design is sound |
 | Insert proof too complex | Open | Start with `Admitted`; prove incrementally case-by-case |
 | wp proofs require deep BRiCk expertise | Open | Start with findNode (simplest); use howto_sequential.v patterns |
 

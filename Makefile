@@ -1,11 +1,12 @@
 # BRiCk verification of Daedalus RB tree (ddl/map.h).
 #
 # Targets:
-#   make proofs      - Build all Coq proofs
+#   make proofs      - Build all Coq proofs (requires AST to be compiled first)
+#   make ast         - Compile the cpp2v-generated AST (~30-60 min, 96K lines)
 #   make cpp2v       - Run cpp2v to generate Coq AST from C++
 #   make status      - Check toolchain installation status
 #   make clean       - Remove generated files
-#   make all         - cpp2v + proofs
+#   make all         - cpp2v + ast + proofs
 #
 # Prerequisites:
 #   The BRiCk workspace must be built first:
@@ -46,9 +47,9 @@ COQ_SRCS := $(COQ_DIR)/RBTree.v \
 # Common flags: set COQLIB and the -R mapping for our project
 COQFLAGS := -coqlib $(COQLIB) -R $(COQ_DIR) daedalus_rb
 
-.PHONY: all proofs cpp2v clean status
+.PHONY: all proofs ast cpp2v clean status
 
-all: cpp2v proofs
+all: cpp2v ast proofs
 
 # ---- cpp2v translation ----
 
@@ -73,6 +74,11 @@ $(COQ_DIR)/map_int_int_cpp_names.vo: $(COQ_DIR)/map_int_int_cpp_names.v
 $(COQ_DIR)/map_int_int_cpp.vo: $(COQ_DIR)/map_int_int_cpp.v $(COQ_DIR)/map_int_int_cpp_names.vo
 	$(COQC) $(COQFLAGS) $<
 
+# Compile the generated AST separately (slow: ~30-60 min for 96K lines).
+# This is a prerequisite for FindSpec.vo and later proof files that
+# reference the C++ function definitions.
+ast: $(COQ_DIR)/map_int_int_cpp.vo
+
 # Hand-written proof files.
 $(COQ_DIR)/RBTree.vo: $(COQ_DIR)/RBTree.v
 	$(COQC) $(COQFLAGS) $<
@@ -80,7 +86,9 @@ $(COQ_DIR)/RBTree.vo: $(COQ_DIR)/RBTree.v
 $(COQ_DIR)/TreeRep.vo: $(COQ_DIR)/TreeRep.v $(COQ_DIR)/RBTree.vo
 	$(COQC) $(COQFLAGS) $<
 
-$(COQ_DIR)/FindSpec.vo: $(COQ_DIR)/FindSpec.v $(COQ_DIR)/RBTree.vo $(COQ_DIR)/TreeRep.vo
+# FindSpec imports map_int_int_cpp for the cpp.spec function name resolution
+# and the verify[source] proof scaffold.
+$(COQ_DIR)/FindSpec.vo: $(COQ_DIR)/FindSpec.v $(COQ_DIR)/RBTree.vo $(COQ_DIR)/TreeRep.vo $(COQ_DIR)/map_int_int_cpp.vo
 	$(COQC) $(COQFLAGS) $<
 
 $(COQ_DIR)/InsertSpec.vo: $(COQ_DIR)/InsertSpec.v $(COQ_DIR)/RBTree.vo $(COQ_DIR)/TreeRep.vo
