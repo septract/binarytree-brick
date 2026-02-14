@@ -128,9 +128,13 @@ establish the functional spec is correct. We:
 - [x] Verified: all Node struct fields present in symbol table
   (`ref_count`, `color` = `Tbool`, `key`, `value`, `left`, `right`)
 
-### Phase 2: Functional Spec
+### Phase 2: Functional Spec (complete, 2026-02-14)
 - [x] Port Lean definitions to `coq/RBTree.v`
-- [ ] Port key invariant lemmas (currently `Admitted`)
+- [x] Port key invariant lemmas — all 35 lemmas/theorems machine-checked (zero `Admitted`)
+  - BST preservation: `isBST_setRebalanceLeft`, `isBST_setRebalanceRight`, `isBST_ins`, `isBST_insert`
+  - NoRedRed preservation: `noRedRed_setRebalanceLeft_black`, `noRedRed_setRebalanceRight_black`, `ins_noRedRed`, `noRedRed_insert`
+  - findNode correctness: `findNode_after_insert`, `findNode_insert_other` (via `findNode_toList` + `toList_setRebalance*`)
+  - fromList invariants: `fromList_isBST`, `fromList_noRedRed`
 
 ### Phase 3: Representation Predicate
 - [ ] Study generated `map_int_int_cpp_names.v` for mangled field names

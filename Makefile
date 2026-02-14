@@ -2,11 +2,13 @@
 #
 # Targets:
 #   make setup       - Install Coq + Iris (opam) and build cpp2v from source
-#   make setup-coq   - Just the opam switch (Coq + Iris + BRiCk theories)
+#   make setup-coq   - Just the opam switch (Coq + Iris)
 #   make setup-cpp2v - Just the cpp2v binary (cmake + LLVM)
 #   make cpp2v       - Run cpp2v to generate Coq AST from C++
 #   make proofs      - Build all Coq proofs (requires generated .v files)
+#   make status      - Check toolchain installation status
 #   make clean       - Remove generated files
+#   make clean-all   - Also remove cloned BRiCk source
 #   make all         - cpp2v + proofs
 #
 # Prerequisites:
@@ -36,7 +38,7 @@ COQ_SRCS := $(COQ_DIR)/RBTree.v \
             $(COQ_DIR)/RefCount.v \
             $(COQ_DIR)/Invariants.v
 
-.PHONY: all setup setup-coq setup-cpp2v cpp2v proofs clean check-env
+.PHONY: all setup setup-coq setup-cpp2v cpp2v proofs clean clean-all check-env status
 
 all: cpp2v proofs
 
@@ -121,3 +123,29 @@ clean:
 
 clean-all: clean
 	rm -rf $(CPP2V_SRC)
+
+# ---- Status ----
+
+# Quick check that the toolchain is working.
+status:
+	@echo "--- cpp2v ---"
+	@if [ -x "$(CPP2V_BIN)" ]; then \
+	  $(CPP2V_BIN) --version 2>&1; \
+	else \
+	  echo "NOT INSTALLED (run: make setup-cpp2v)"; \
+	fi
+	@echo ""
+	@echo "--- Coq ---"
+	@if eval $$(opam env --switch=brick 2>/dev/null) && command -v coqc >/dev/null 2>&1; then \
+	  eval $$(opam env --switch=brick) && coqc --version; \
+	else \
+	  echo "NOT INSTALLED (run: make setup-coq)"; \
+	fi
+	@echo ""
+	@echo "--- Generated AST ---"
+	@if [ -f "$(GEN_AST)" ]; then \
+	  echo "$(GEN_AST): $$(wc -l < $(GEN_AST)) lines"; \
+	  echo "$(GEN_NAMES): $$(wc -l < $(GEN_NAMES)) lines"; \
+	else \
+	  echo "NOT GENERATED (run: make cpp2v)"; \
+	fi
