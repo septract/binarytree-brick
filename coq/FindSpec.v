@@ -276,8 +276,172 @@ Proof using MOD.
   - (** Spec implies wp. *)
     iIntros "!>" (Q vals) "Hspec".
     iApply wp_func_intro.
-    (** Phase B: now inside [wp_func' false tu findNode_func vals Q].
-        Next: simpl/cbn to unfold, then process bind_vars + body. *)
+    (** After [wp_func_intro], the goal is [wp_func' false] applied to
+        our concrete function. Simplify to expose [bind_vars] + [wp]. *)
+    rewrite /findNode_func /=.
+    (** [Hspec] is in the spatial context from line 277. The goal is
+        [match vals with [p; p0] => wp ... | _ => ERROR end].
+        Extract existentials from [Hspec] to learn [vals = [pv; pv0]],
+        then the match simplifies. *)
+    iDestruct "Hspec" as (pv v pv0 v0) "(%Hvals & Hpk & Hpn & Hspec)".
+    subst vals. simpl.
+    (** Now in the [pv; pv0] case. Extract user-level spec resources. *)
+    iDestruct "Hspec" as (k n q t) "(%Hargs & Htree & Hcont)".
+    injection Hargs as Hv Hv0. subst v v0.
+    (** Now we have concrete resources:
+        - [Hpk : pv |-> tptsto_fuzzyR Tint 1 (Vint k)]
+        - [Hpn : pv0 |-> tptsto_fuzzyR (Tptr _Node) 1 (Vptr n)]
+        - [Htree : n |-> treeR q t]
+        - [Hcont : postcondition continuation]
+        Goal: [▷ wp source ρ findNode_body (Kreturn ...)]
+        where ρ binds "k" → pv, "n" → pv0. *)
+    (** Phase D: process the function body.
+        Strip later, then enter the Sseq. *)
+    iNext.
+    iApply wp_seq.
+    (** Now: [wp_block ρ [Sdecl [...]; Swhile ...; Sreturn ...] K].
+        Unfold [wp_block] for the [Sdecl] case. *)
+    rewrite wp_block_eq /wp_block_def.
+    (** Now: [wp_decls ρ [Dvar "curr" ... (Some init)] (λ ρ free, ...)].
+        Unseal and simplify [wp_decls]. *)
+    rewrite wp_decls_eq /wp_decls_def /=.
+    (** Strip fancy update [|={⊤}=>], later [▷]. *)
+    iModIntro. iNext.
+    (** Now: [∀ addr, qual_norm (wp_initialize_unqualified ...) (Tptr _Node) addr init Q].
+        Introduce the fresh address for [curr]. *)
+    iIntros (curr_p).
+    (** [qual_norm] strips type qualifiers.  For [Tptr _Node] (no qualifiers),
+        it passes through to [wp_initialize_unqualified]. *)
+    rewrite /qual_norm /=.
+    (** Unseal [wp_initialize_unqualified] for [Tptr _Node] case.
+        This gives: [letI* v, free := wp_operand ρ init in
+                      curr_p |-> tptsto_fuzzyR ... v -* Q free]. *)
+    rewrite wp_initialize_unqualified.unlock /=.
+    (** Goal: [wp_operand ρ (Ecast Cl2r (Evar "n" (Tptr _Node))) (λ v free, ...)].
+        Apply l2r cast axiom, then variable lookup. *)
+    iApply wp_operand_cast_l2r.
+    (** Goal: [wp_glval ρ (Evar "n" ...) (λ a free, ∃ v, ...)].
+        [wp_glval] dispatches to [wp_lval] for lvalue expressions. *)
+    rewrite /wp_glval /=.
+    (** Apply variable lookup axiom. *)
+    iApply wp_lval_var.
+    (** [_local ρ "n"] computes to [pv0]; [read_decl pv0 (Tptr _Node)] for
+        non-reference type simplifies to the continuation applied to [pv0].
+        Goal: [∃ v, (∃ q, pv0 |-> initializedR ... q v ∗ True) ∧ (wand)]. *)
+    rewrite /read_decl /_local /=.
+    (** Goal: [reference_to (Tptr _Node) pv0 ∗
+               ∃ v, (∃ q, pv0 |-> initializedR ... q v ∗ True) ∧ (wand)].
+        First, observe [reference_to] and [has_type] from [Hpn] before
+        consuming it. *)
+    iDestruct (observe (reference_to _ _) with "Hpn") as "#Href".
+    (** Derive [has_type (Vptr n) (Tptr _Node)] from [Hpn] via observe.
+        [has_type_or_undef v ty = has_type v ty ∨ v = Vundef];
+        discriminate the [Vundef] case. *)
+    iAssert (has_type (Vptr n) (Tptr (Tnamed _Node_name)))%I as "#Hht".
+    { iDestruct (observe (has_type_or_undef _ _) with "Hpn") as "#Hty".
+      iRevert "Hty". rewrite has_type_or_undef_unfold.
+      iIntros "[H | %Habs]"; [iExact "H" | discriminate]. }
+    iFrame "Href".
+    iExists (Vptr n).
+    iSplit.
+    { (** Left of ∧: [∃ q, pv0 |-> initializedR ... q (Vptr n) ∗ True]. *)
+      iExists (cQp.m 1).
+      rewrite _at_initializedR.
+      iFrame "Hpn Hht". }
+    (** Right of ∧: [curr_p |-> tptsto_fuzzyR ... -∗ interp ...]. *)
+    iIntros "Hcurr".
+    (** [interp source FreeTemps.id P = |={⊤}=> P]. *)
+    rewrite interp_unfold /=.
+    (** Strip modalities one by one until we reach the wp. *)
+    iModIntro. iModIntro.
+    (** Goal: [|={⊤}▷=> |={⊤}▷=> wp ...].
+        [|={⊤}▷=>] is the step modality. Strip with iModIntro. *)
+    (** Strip remaining modalities to reach the while loop. *)
+    iModIntro. iNext. do 4 iModIntro.
+    (** === Phase E: Apply [wp_while_inv] ===
+
+        The invariant captures the entire spatial context:
+        - Local variable [curr] storing [Vptr cv]
+        - Parameters [k] (at [pv]) and [n] (at [pv0])
+        - Current subtree [cv |-> treeR q tc]
+        - Functional correspondence [findNode k t = findNode k tc]
+        - Magic wand (zipper): given back [tc], reconstruct full tree [t]
+        - Postcondition handler [Hcont]: connects to caller's [Q]
+
+        [Kloop] passes [ReturnVal] through to the outer continuation,
+        so [Hcont] must be inside the invariant for the "found" [return]
+        case. It is also needed after loop exit for [return nullptr]. *)
+    iApply (wp_while_inv source (
+      Exists (cv : ptr) (tc : tree Z Z),
+        curr_p |-> tptsto_fuzzyR (Tptr _Node) (cQp.m 1) (Vptr cv) **
+        pv |-> tptsto_fuzzyR Tint (cQp.m 1) (Vint k) **
+        pv0 |-> tptsto_fuzzyR (Tptr _Node) (cQp.m 1) (Vptr n) **
+        cv |-> treeR q tc **
+        [| findNode k t = findNode k tc |] **
+        (cv |-> treeR q tc -* n |-> treeR q t) **
+        (Forall ret : ptr,
+          n |-> treeR q t **
+          [| match findNode k t with
+             | Some _ => ret <> nullptr
+             | None => ret = nullptr
+             end |] -*
+          Forall ra : ptr,
+            pv |-> anyR Tint (cQp.m 1) **
+            pv0 |-> anyR (Tptr _Node) (cQp.m 1) **
+            ra |-> tptsto_fuzzyR (Tptr _Node) (cQp.m 1) (Vptr ret) -*
+            Q ra))%I).
+    { (** Inductive step: [I ⊢ while_unroll ρ None test body (Kloop (|> I) K)].
+          [while_unroll] unfolds to [wp ρ (Sif None test body Sbreak) (Kloop (|> I) K)].
+
+          Overview of the three control flow paths:
+          1. [curr = nullptr] → test false → [Sbreak] → loop exit via [K Normal]
+          2. [k < curr->key] → descend left, re-establish [|> I]
+          3. [curr->key < k] → descend right, re-establish [|> I]
+          4. [k = curr->key] → found → [Sreturn_val curr] → [K (ReturnVal p)] *)
+      iIntros "HI".
+      iDestruct "HI" as (cv tc)
+        "(Hcurr & Hpk & Hpn & Htree_cv & %Hcorr & Hwand & Hcont)".
+      (** [while_unroll] = [wp ρ (Sif None test body Sbreak)].
+          Apply the [Sif] wp axiom. *)
+      rewrite /while_unroll.
+      iApply (wp_if source).
+      (** Goal should be: [|> wp_test source ρ test (fun c free => ...)].
+          Strip the later modality. *)
+      iNext.
+      (** Now process the test expression:
+            [Ebinop Bneq (Ecast Cl2r (Evar "curr" _)) (Ecast (Cnull2ptr _) Enull) "bool"]
+
+          Next steps (Phase F):
+          1. [iApply (wp_operand_binop source)] to decompose the binary op
+          2. Handle [nd_seq] (non-deterministic evaluation order):
+             both orderings are equivalent for pure pointer reads
+          3. Evaluate left operand: [Ecast Cl2r (Evar "curr" _)] → reads [cv]
+          4. Evaluate right operand: [Ecast (Cnull2ptr _) Enull] → [Vptr nullptr]
+          5. [eval_binop Bneq]: use [eval_ptr_neq] + [eval_ptr_eq] + [ptr_comparable]
+          6. Branch on [is_true]:
+             - [true]  ([cv <> nullptr]): process inner if-else + Kloop
+             - [false] ([cv = nullptr]): process Sbreak → K Normal (loop exit)
+
+          Key axioms needed (all in core library):
+          - [wp_operand_binop source] (expr.v) — binary op decomposition
+          - [wp_operand_cast_null source] (expr.v) — nullptr literal
+          - [wp_operand_cast_l2r source] (expr.v) — l2r cast (read local)
+          - [eval_ptr_neq] (operator.v) — pointer ≠ comparison
+          - [treeR_null] — [nullptr |-> treeR q t ⊢ [| t = Leaf |]]
+
+          For the inner if-else ([k < curr->key]):
+          - [wp_lval_member source] (expr.v) — field access
+          - [wp_lval_assign source] (expr.v) — assignment [curr = curr->left]
+          - [wp_return source] (stmt.v) — [return curr] in the found case *)
+      admit. }
+    (** Establish the invariant from the current spatial resources.
+        Initial values: [cv = n] (curr starts at n), [tc = t] (full tree). *)
+    iExists n, t.
+    iFrame "Hcurr Hpk Hpn Htree Hcont".
+    iSplitR.
+    { iPureIntro. reflexivity. }
+    (** Magic wand: identity wand [n |-> treeR q t -* n |-> treeR q t]. *)
+    iIntros "H". iExact "H".
 Admitted.
 
 End with_Sigma.

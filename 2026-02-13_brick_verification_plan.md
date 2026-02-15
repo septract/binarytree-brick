@@ -1,7 +1,7 @@
 # BRiCk Verification Plan for Daedalus Red-Black Tree
 
 *Created: 2026-02-13*
-*Updated: 2026-02-14 — Phases 2-4 substantially complete (spec registered, proof scaffold with loop invariant, Aborted at loop body)*
+*Updated: 2026-02-14 — Phase 4 at loop invariant applied; Phases A-E of plan complete (spec, func_ok, decl processing, wp_while_inv with magic-wand invariant). Inductive step (Phase F) next.*
 
 ## Motivation
 
@@ -172,10 +172,25 @@ establish the functional spec is correct. We:
   - Type agreement (`type_of_spec = type_of_value`) proves by `reflexivity`
   - Proof enters wp via `iApply wp_func_intro` successfully
   - FindSpec.v compiles with zero errors (only benign notation warnings)
-- [ ] Unfold `wp_func'` → `bind_vars` → wp body (iterative coqc)
-- [ ] Process `Sdecl` + reach `Swhile`
-- [ ] Apply `wp_while_inv`, set up loop invariant
+- [x] Unfold `wp_func'` → `bind_vars` → wp body (2026-02-14)
+  - `iApply wp_func_intro` + `rewrite /findNode_func /=`
+  - Extract spec resources from elaborated `Hspec`: `Hpk`, `Hpn`, `Htree`, `Hcont`
+  - Process `iNext`, `iApply wp_seq`, unseal `wp_block_eq`, `wp_decls_eq`
+- [x] Process `Sdecl` + reach `Swhile` (2026-02-14)
+  - `wp_initialize_unqualified.unlock`, `wp_operand_cast_l2r`, `wp_lval_var`
+  - Prove `reference_to` and `has_type` via `Observe` instances
+  - Strip 7+ modalities (`|={⊤}=>`, `|={⊤}▷=>`) via `iModIntro`/`iNext`
+- [x] Apply `wp_while_inv`, set up loop invariant (2026-02-14)
+  - Invariant captures: `curr` local, `k`/`n` params, subtree, correspondence,
+    magic wand zipper, and postcondition handler (`Hcont`)
+  - `Kloop` passes `ReturnVal` through → `Hcont` must be in invariant
+  - Initial establishment: `curr_val = n`, `t_curr = t`, identity wand
+  - `wp_while_inv source I` takes `tu : translation_unit` as first explicit arg
+  - Inductive step scaffolded with `admit` (Phase F)
 - [ ] Complete loop body proof (left/right/found branches)
+  - Next: `wp_operand_binop` for `Bneq` test, `nd_seq` for eval order,
+    `eval_ptr_neq`/`eval_ptr_eq` for pointer comparison,
+    `wp_operand_cast_null` for nullptr, then branch on `is_true`
 - [ ] Loop exit + return nullptr
 - [ ] Clean up, reduce Admitted count
 
