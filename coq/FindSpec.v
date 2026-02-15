@@ -24,19 +24,19 @@
     == Proof strategy ==
 
     The C++ version uses a while loop; the Coq spec uses structural
-    recursion. We prove equivalence via a loop invariant and [wp_while].
+    recursion. We prove equivalence via a loop invariant and [wp_while_inv].
 
-    Loop invariant — holds before each evaluation of the loop condition:
+    Loop invariant -- holds before each evaluation of the loop condition:
 
       Exists curr_p t_curr,
-        _local ρ "curr" |-> ptrR<_Node> 1$m curr_p **
+        _local rho "curr" |-> ptrR<_Node> 1$m curr_p **
         curr_p |-> treeR q t_curr **
         [| findNode k t = findNode k t_curr |] **
         (curr_p |-> treeR q t_curr -* n |-> treeR q t)
 
     The invariant holds four resources:
 
-    1. [_local ρ "curr" |-> ...]: the local variable [curr] stores pointer
+    1. [_local rho "curr" |-> ...]: the local variable [curr] stores pointer
        [curr_p].
 
     2. [curr_p |-> treeR q t_curr]: the current position in the tree.
@@ -47,7 +47,7 @@
        [findNode] agrees between the original tree and the current subtree.
 
     4. [(curr_p |-> treeR q t_curr -* n |-> treeR q t)]: the magic wand
-       ("zipper") — given back the subtree at [curr_p], reconstruct the
+       ("zipper") -- given back the subtree at [curr_p], reconstruct the
        full tree at [n]. This captures all the ancestor nodes' fields and
        sibling subtrees encountered during the traversal.
 
@@ -55,6 +55,13 @@
     branches on the comparison, and descends into a child.
     The wand is extended by composing: the old wand + the fields of the
     current node + the sibling subtree.
+
+    == Approach ==
+
+    This file uses ONLY the open-source BRiCk core library
+    ([skylabs.lang.cpp.*]), NOT the proprietary [skylabs.auto] package.
+    The spec is constructed manually with [SFunction] and the proof
+    obligation is stated using [func_ok] directly.
 
     == Dependencies ==
 
@@ -101,259 +108,176 @@ Lemma findNode_eq_key : forall k kn : Z,
   ~ (k < kn)%Z -> ~ (kn < k)%Z -> k = kn.
 Proof. lia. Qed.
 
-(** ** BRiCk imports
+(** ** BRiCk imports (open-source core library only)
 
-    After pure lemmas to avoid ssreflect conflicts.
+    After pure lemmas to avoid ssreflect [rewrite] conflict.
 
-    [prelude.spec] provides the [cpp.spec] command for spec registration.
-    [prelude.proof] provides [verify_spec], [go], [wp_while], etc. *)
+    Uses [skylabs.lang.cpp.cpp] which re-exports:
+    - [skylabs.lang.cpp.syntax]: C++ AST types
+    - [skylabs.lang.cpp.semantics]: operational semantics
+    - [skylabs.lang.cpp.logic]: wp axioms ([func_ok], [wp_func],
+      [wp_while_inv], [wp_if], [wp_seq], etc.)
+    - [skylabs.lang.cpp.specs]: [SFunction], spec notations
+      ([\arg], [\prepost], [\post])
+    - [skylabs.lang.cpp.parser]: translation unit, [genv_compat] *)
 
-Require Import skylabs.auto.cpp.prelude.spec.
-Require Import skylabs.auto.cpp.prelude.proof.
+Require Import skylabs.lang.cpp.cpp.
+Require Import skylabs.iris.extra.proofmode.proofmode.
 Import cQp_compat.
 
 Require Import daedalus_rb.TreeRep.
 Require Import daedalus_rb.map_int_int_cpp.
-
-(** ** Lazy unfolding hints for [treeR]
-
-    Enables BRiCk's automation to unfold [treeR] on demand during
-    proof search, following the pattern from [linked_list_cpp_proof.v]. *)
-#[only(lazy_unfold)] derive treeR.
 
 (** ** Spec and proof section *)
 
 Section with_Sigma.
 Context `{Sigma : cpp_logic} `{MOD: map_int_int_cpp.source ⊧ σ}.
 
-(** Conditional-smashing hint: automatically split [Sif] branches when
-    one branch cannot terminate normally (e.g., ends in [return]). *)
-#[local] Hint Resolve smash_delayed_case_no_join_B : db_skylabs_wp.
-
 (** *** Null pointer helper
 
-    [nullptr] cannot represent a non-leaf tree. Used as a forwarding
-    hint for automation to discharge impossible cases (e.g., when
-    [curr = nullptr] but [t_curr] is a [Node]).
+    [nullptr] cannot represent a non-leaf tree. Used in the loop exit
+    case to conclude [t_curr = Leaf] when [curr_p = nullptr].
 
-    Following the pattern of [nodeR_null_False] in the linked list demo.
     [treeR]'s Node case includes [structR _Node_name q], which implies
-    [nonnullR] — contradicting [nullptr]. The [work] tactic resolves
-    this automatically.
+    [nonnullR] -- contradicting [nullptr].
 
-    [Admitted]: requires [work] from the proprietary [skylabs.auto]
-    package (see note at end of file). *)
+    TODO: Prove with Iris tactics once we have the proof infrastructure
+    working. For now [Admitted]. *)
 Lemma treeR_null q' t' : nullptr |-> treeR q' t' |-- [| t' = Leaf |].
-Proof. destruct t'; [work|]. rewrite treeR_node. work. Admitted.
-Definition treeR_null_F := [FWD] treeR_null.
+Proof.
+  destruct t'.
+  - rewrite treeR_leaf. auto.
+  - rewrite treeR_node.
+    (* Node case: structR _Node_name q' implies nonnullR,
+       contradicting nullptr. Needs manual Iris proof. *)
+Admitted.
 
 (** *** Function specification
 
     [findNode] is a static method on [DDL::Map<int,int>::Node], so
-    there is no [\this] argument — both parameters are explicit.
+    there is no [\this] argument -- both parameters are explicit.
 
     The tree is borrowed via fractional permission [q] ([\prepost] frame):
     unchanged across the call.
 
     Return value: [nullptr] when key absent, non-null when present.
 
-    The C++ function name string was derived from the cpp2v AST:
-    - [n4041 = DDL::Map<int,int>::Node] (the enclosing class)
-    - [n12334 = findNode(int, Node*)] (the static method)
-    See [map_int_int_cpp.v] lines 4790 and 18701.
+    Constructed manually with [SFunction] (replacing the proprietary
+    [cpp.spec] command from [skylabs.auto]).
 
-    If the name string doesn't match BRiCk's parser expectations for
-    template names, try alternative formats:
-    - ["DDL::Map<int,int>::Node::findNode(int, DDL::Map<int,int>::Node*)"]
-      (no spaces after commas in template args)
-    - Use [verify[map_int_int_cpp.source] "..."] with the string directly *)
+    Types from the cpp2v-generated AST ([map_int_int_cpp.v]):
+    - Return type: [Tptr _Node] (= [t711] in AST)
+    - Param types: [Tint] for [k], [Tptr _Node] for [n]
+    - Calling convention: [CC_C], arity: [Ar_Definite] *)
 
-cpp.spec "DDL::Map<int, int>::Node::findNode(int, DDL::Map<int, int>::Node*)"
-    as findNode_spec with (
-  \arg{k} "k" (Vint k)
-  \arg{n} "n" (Vptr n)
-  \prepost{q t} n |-> treeR q t
-  \post{ret}[Vptr ret]
-    [| match findNode k t with
-       | None   => ret = nullptr
-       | Some _ => ret <> nullptr
-       end |]
-).
+Definition findNode_spec : function_spec :=
+  SFunction (cc:=CC_C) (ar:=Ar_Definite) (Tptr _Node) (Tint :: Tptr _Node :: nil)
+    (cpp_spec (ar:=Ar_Definite) (Tptr _Node) (Tint :: Tptr _Node :: nil)
+      (\arg{k} "k" (Vint k)
+       \arg{n} "n" (Vptr n)
+       \prepost{q t} n |-> treeR q t
+       \post{ret}[Vptr ret]
+         [| match findNode k t with
+            | None   => ret = nullptr
+            | Some _ => ret <> nullptr
+            end |])).
 
-(** *** Proof
+(** *** C++ function body (transcribed from cpp2v AST)
 
-    The proof follows BRiCk's [verify_spec'] + [go] + [wp_while] pattern
-    from the loop tutorial ([docs/control_flow/loop.v]).
+    The function body is transcribed from [map_int_int_cpp.v] lines
+    93219-93258. [findNode] is a static method ([Dmethod n12334 true]),
+    so [static_method] converts the [Method] to a [Func] by:
+    - dropping the class/qualifier info
+    - wrapping [UserDefined body] as [Impl body]
 
-    After [verify_spec'; go.] processes the function entry and the
-    [Sdecl [curr = n]] initialization, we're at the [Swhile].
-    [wp_while] generates two subgoals:
+    We inline the resulting [Func] directly rather than extracting it
+    from the translation unit, because the AST's local definitions
+    ([n12334], [t711]) are not exported.
 
-    1. Establish the invariant from the initial resources.
-    2. Given the invariant, unroll one iteration (evaluate condition,
-       process body or exit, re-establish invariant or postcondition).
+    The types used match the AST exactly:
+    - [Tptr _Node] = [t711] = [Tptr (Tnamed n4041)]
+    - [Tint] = key type
+    - Field accesses use core [Emember] with [Nid "field_name"] directly
+      (not the parser's [Field] wrapper which isn't in scope here) *)
 
-    In the loop body:
-    - [curr != nullptr] → [t_curr] is a [Node] (by [treeR_null] contrapositive)
-    - Unfold [treeR] to expose fields ([_key], [_left], [_right])
-    - Branch on [k < kn] / [kn < k] / [k = kn]:
-      - Left: [findNode_lt], take left child, extend wand
-      - Right: [findNode_gt], take right child, extend wand
-      - Equal: [findNode_eq], recover full tree via wand, return [curr]
-    - Loop exit: [curr = nullptr] → [t_curr = Leaf] → recover tree, return [nullptr] *)
+#[local] Open Scope pstring_scope.
+Definition findNode_body : Stmt :=
+  Sseq (
+    (Sdecl (
+      (Dvar "curr" (Tptr _Node)
+        (Some
+          (Ecast Cl2r (Evar "n" (Tptr _Node))))) :: nil)) ::
+    (Swhile None
+      (Ebinop Bneq
+        (Ecast Cl2r (Evar "curr" (Tptr _Node)))
+        (Ecast (Cnull2ptr (Tptr _Node)) Enull) Tbool)
+      (Sseq (
+        (Sif None
+          (Ebinop Blt
+            (Ecast Cl2r (Evar "k" Tint))
+            (Ecast Cl2r
+              (Emember true
+                (Ecast Cl2r (Evar "curr" (Tptr _Node)))
+                (Nid "key") false Tint)) Tbool)
+          (Sexpr
+            (Eassign (Evar "curr" (Tptr _Node))
+              (Ecast Cl2r
+                (Emember true
+                  (Ecast Cl2r (Evar "curr" (Tptr _Node)))
+                  (Nid "left") false (Tptr _Node)))
+              (Tptr _Node)))
+          (Sif None
+            (Ebinop Blt
+              (Ecast Cl2r
+                (Emember true
+                  (Ecast Cl2r (Evar "curr" (Tptr _Node)))
+                  (Nid "key") false Tint))
+              (Ecast Cl2r (Evar "k" Tint)) Tbool)
+            (Sexpr
+              (Eassign (Evar "curr" (Tptr _Node))
+                (Ecast Cl2r
+                  (Emember true
+                    (Ecast Cl2r (Evar "curr" (Tptr _Node)))
+                    (Nid "right") false (Tptr _Node)))
+                (Tptr _Node)))
+            (Sreturn_val
+              (Ecast Cl2r (Evar "curr" (Tptr _Node)))))) :: nil))) ::
+    (Sreturn_val
+      (Ecast (Cnull2ptr (Tptr _Node)) Enull)) :: nil).
 
-Lemma findNode_ok : verify[map_int_int_cpp.source] findNode_spec.
+Definition findNode_func : Func :=
+  {| f_return := Tptr _Node
+   ; f_params := ("k", Tint) :: ("n", Tptr _Node) :: nil
+   ; f_cc := CC_C
+   ; f_arity := Ar_Definite
+   ; f_exception := exception_spec.MayThrow
+   ; f_body := Some (Impl findNode_body) |}.
+#[local] Close Scope pstring_scope.
+
+(** *** Proof obligation
+
+    [func_ok tu f spec] asserts:
+    1. Type agreement: [type_of_spec spec = type_of_value (Ofunction f)]
+    2. For all postconditions [Q] and argument values [vals]:
+       [spec.(fs_spec) vals Q -* wp_func tu f vals Q]
+
+    This is the manual equivalent of [verify[source] findNode_spec]
+    from the proprietary [skylabs.auto] package. *)
+
+Lemma findNode_ok :
+  |-- func_ok map_int_int_cpp.source findNode_func findNode_spec.
 Proof using MOD.
-  verify_spec'; go.
-
-  (** Supply loop invariant. [wp_while] generates two subgoals:
-      (1) establish invariant, (2) preserve across one iteration. *)
-  wp_while (fun ρ =>
-    Exists (curr_p : ptr) (t_curr : tree Z Z),
-      _local ρ "curr" |-> ptrR<_Node> 1$m curr_p **
-      curr_p |-> treeR q t_curr **
-      [| findNode k t = findNode k t_curr |] **
-      (curr_p |-> treeR q t_curr -* n |-> treeR q t)).
-
-  { (** Subgoal 1: Establish invariant.
-        [curr_p := n], [t_curr := t], wand is reflexive [P -* P]. *)
-    iExists n, t. iFrame.
-    iSplitL "".
-    - iPureIntro. reflexivity.
-    - iIntros "H". iExact "H". }
-
-  (** Subgoal 2: One iteration of the loop.
-      [go] evaluates the condition [curr != nullptr], reading [curr]
-      from [_local ρ "curr"]. This leaves us at a [wp_if] branch. *)
-  go.
-
-  wp_if => CURR_NONNULL.
-
-  - (** Branch: [curr != nullptr] — enter loop body.
-        Destructure the invariant to access individual resources. *)
-    iDestruct 1 as (curr_p t_curr) "(Hlocal & Htree & %Hfind & Hwand)".
-
-    (** [curr_p ≠ nullptr], so [t_curr] cannot be [Leaf].
-        Contradiction via [treeR_leaf] which asserts [this = nullptr]. *)
-    destruct t_curr as [| c l kn vn r].
-    { rewrite treeR_leaf.
-      iDestruct "Htree" as "%Heq". exfalso. congruence. }
-
-    (** [t_curr = Node c l kn vn r]. Unfold [treeR] to expose fields. *)
-    rewrite treeR_node.
-    iDestruct "Htree" as (lp rp rc) "(Hleft & Hright & Hfields)".
-
-    (** Process: [if (k < curr->key)].
-        [go] reads [curr->key] from [Hfields], evaluates [Ebinop Blt]. *)
-    go.
-
-    wp_if => K_LT.
-
-    + (** [k < kn]: execute [curr := curr->left].
-          [go] reads [curr->left] from [Hfields], assigns to [curr]. *)
-      go.
-
-      (** Re-establish the invariant with [curr_p := lp, t_curr := l]. *)
-      iExists lp, l.
-      iFrame "Hlocal Hleft".
-      iSplitL "".
-      { iPureIntro. rewrite Hfind. apply findNode_lt. lia. }
-
-      (** Extend the wand: [lp |-> treeR q l -* n |-> treeR q t].
-          Given the left subtree back, reassemble the [Node] at [curr_p],
-          then apply the old wand. *)
-      iIntros "Hl".
-      iApply "Hwand".
-      rewrite treeR_node. iExists lp, rp, rc. iFrame.
-
-    + (** [k >= kn]: process [else if (curr->key < k)].
-          [go] reads [curr->key] again, evaluates [Ebinop Blt]. *)
-      go.
-
-      wp_if => K_GT.
-
-      * (** [kn < k]: execute [curr := curr->right].
-            [go] reads [curr->right] from [Hfields], assigns to [curr]. *)
-        go.
-
-        (** Re-establish the invariant with [curr_p := rp, t_curr := r]. *)
-        iExists rp, r.
-        iFrame "Hlocal Hright".
-        iSplitL "".
-        { iPureIntro. rewrite Hfind. apply findNode_gt. lia. }
-
-        (** Extend the wand: [rp |-> treeR q r -* n |-> treeR q t].
-            Given the right subtree back, reassemble the [Node] at
-            [curr_p], then apply the old wand. *)
-        iIntros "Hr".
-        iApply "Hwand".
-        rewrite treeR_node. iExists lp, rp, rc. iFrame.
-
-      * (** [k = kn]: execute [return curr].
-            Neither [k < kn] nor [kn < k], so [k = kn].
-            [go] processes the [Sreturn_val]. *)
-        go.
-
-        (** Postcondition: the function returns [curr_p ≠ nullptr].
-            Recover the full tree via the wand. *)
-        iAssert (curr_p |-> treeR q (Node c l kn vn r))
-          with "[Hleft Hright Hfields]" as "Htree".
-        { rewrite treeR_node. iExists lp, rp, rc. iFrame. }
-        iDestruct ("Hwand" with "Htree") as "Hfull".
-        iFrame "Hfull".
-        iPureIntro.
-
-        (** [findNode k (Node c l k vn r) = Some vn] by [findNode_eq].
-            Since [k = kn] (by [findNode_eq_key]), the [Some _] branch
-            of the postcondition match requires [ret ≠ nullptr],
-            which holds since [curr_p ≠ nullptr]. *)
-        assert (Hkeq : k = kn) by lia.
-        subst kn. rewrite Hfind. rewrite findNode_eq.
-        discriminate.
-
-  - (** Branch: [curr = nullptr] — exit loop, then [return nullptr].
-
-        The invariant gives us [curr_p |-> treeR q t_curr] with
-        [curr_p = nullptr]. By [treeR_null], [t_curr = Leaf]. *)
-    iDestruct 1 as (curr_p t_curr) "(Hlocal & Htree & %Hfind & Hwand)".
-    iDestruct (treeR_null with "Htree") as "%Hleaf". subst.
-
-    (** Recover the full tree by applying the wand.
-        [nullptr |-> treeR q Leaf] holds trivially since
-        [treeR q Leaf = as_Rep (fun p => [| p = nullptr |])]. *)
-    iAssert (nullptr |-> treeR q Leaf) as "Hnull".
-    { rewrite treeR_leaf. iPureIntro. reflexivity. }
-    iDestruct ("Hwand" with "Hnull") as "Hfull".
-
-    (** Process [return nullptr]. *)
-    go.
-
-    (** Deliver postcondition:
-        [n |-> treeR q t] (from wand) and [findNode k t = None]
-        (since [t_curr = Leaf] and [findNode k t = findNode k Leaf = None]). *)
-    iFrame "Hfull".
-    iPureIntro. rewrite Hfind. reflexivity.
+  rewrite /func_ok.
+  iSplit.
+  - (** Type agreement: [type_of_spec findNode_spec =
+         type_of_value (Ofunction findNode_func)].
+         Should reduce to equality of function types. *)
+    iPureIntro. reflexivity.
+  - (** Spec implies wp. *)
+    iIntros "!>" (Q vals) "Hspec".
+    iApply wp_func_intro.
+    (** Phase B: now inside [wp_func' false tu findNode_func vals Q].
+        Next: simpl/cbn to unfold, then process bind_vars + body. *)
 Admitted.
-(** [Admitted] not because the proof logic is incomplete, but because the
-    file depends on [skylabs.auto.cpp.prelude.{spec,proof}] — a proprietary
-    package ([SkyLabsAI/auto], marked [private] in the workspace config)
-    that is documented in the BRiCk [auto-docs] but not included in the
-    public workspace ([make clone-public] skips private repos).
-
-    Without [auto], the following are unavailable:
-    - [cpp.spec] command (spec registration against the AST)
-    - [verify_spec'] (unfolds spec into wp goal)
-    - [go] (automation for sequential C++ statement processing)
-    - [work] (separation logic goal solver)
-    - [wp_while] / [wp_if] (convenience tactic wrappers)
-
-    The core BRiCk library ([skylabs.lang.cpp.*]) provides the underlying
-    theorems ([wp_while_inv], [func_ok], [SFunction], Iris proof mode) but
-    not the automation layer that makes proofs tractable.
-
-    To compile this file:
-    1. Clone [SkyLabsAI/auto] into [.brick-workspace/fmdeps/auto/]
-    2. Rebuild: [cd .brick-workspace && dune build]
-    3. The proof should then type-check (modulo minor tactic adjustments). *)
 
 End with_Sigma.

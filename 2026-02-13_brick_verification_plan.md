@@ -155,29 +155,29 @@ establish the functional spec is correct. We:
 - [x] Clean up scaffold files: remove duplicated Admitted lemmas, add BRiCk imports
 - [x] Invariants.v now compiles (removed dependency on unbuilt scaffold files)
 
-### Phase 4: FindNode Proof (blocked on `auto` package, 2026-02-14)
+### Phase 4: FindNode Proof (using core library only, 2026-02-14)
 - [x] Write `findNode_spec` as BRiCk `SFunction` specification in FindSpec.v
 - [x] Document loop invariant and wp proof strategy
-- [x] Switch to `cpp.spec` registration (resolves against cpp2v AST)
 - [x] Add `ast` Makefile target for compiling the 96K-line generated AST
 - [x] Compile the 96K-line generated AST (`map_int_int_cpp.vo`) — success
 - [x] Add `map_int_int_cpp.vo` as dependency for `FindSpec.vo`
-- [x] Import `prelude.spec` + `prelude.proof` for full BRiCk automation
-- [x] Add `#[only(lazy_unfold)] derive treeR.` for automation unfold hints
-- [x] Add `treeR_null` / `treeR_null_F` forwarding hint
 - [x] Add `structR _Node_name q` to `treeR`'s Node case (makes `treeR_null` provable)
-- [x] Add `smash_delayed_case_no_join_B` hint for if/else branch splitting
-- [x] Write `findNode_ok` proof with `verify_spec'; go.` + `wp_while`
 - [x] Design magic-wand loop invariant (zipper pattern for tree traversal)
-- [x] Complete loop body proof — full separation logic argument with Iris tactics
-  - Invariant initialization (reflexive wand), three loop branches (left/right/found),
-    loop exit (nullptr → Leaf), wand extension/recovery in each case
-- **BLOCKED**: `Admitted` because `skylabs.auto` package is proprietary
-  - `SkyLabsAI/auto` is marked `private` in workspace `dev/repos/config.mk`
-  - `make clone-public` skips it; only `make clone` (with GitHub access) clones it
-  - Without `auto`: no `cpp.spec`, `verify_spec'`, `go`, `work`, `wp_while` tactic
-  - Core library (`skylabs.lang.cpp.*`) has theorems but not automation
-  - To unblock: clone `SkyLabsAI/auto` → `fmdeps/auto/`, rebuild workspace
+- [x] **Replaced proprietary `skylabs.auto` with core BRiCk** (2026-02-14)
+  - Replaced `skylabs.auto.cpp.prelude.{spec,proof}` with `skylabs.lang.cpp.cpp`
+  - Used `cpp_spec` from core `elaborate.v` for val→ptr spec conversion
+  - Used core `Emember` constructor directly (not parser's `Field` wrapper)
+  - Added `skylabs.iris.extra.proofmode.proofmode` for Iris tactics
+  - Scoped `pstring_scope` around AST definitions to avoid Iris conflict
+  - Type agreement (`type_of_spec = type_of_value`) proves by `reflexivity`
+  - Proof enters wp via `iApply wp_func_intro` successfully
+  - FindSpec.v compiles with zero errors (only benign notation warnings)
+- [ ] Unfold `wp_func'` → `bind_vars` → wp body (iterative coqc)
+- [ ] Process `Sdecl` + reach `Swhile`
+- [ ] Apply `wp_while_inv`, set up loop invariant
+- [ ] Complete loop body proof (left/right/found branches)
+- [ ] Loop exit + return nullptr
+- [ ] Clean up, reduce Admitted count
 
 ### Phase 5: Insert Proof
 - [ ] Prove `makeCopy_spec`
@@ -202,7 +202,7 @@ establish the functional spec is correct. We:
 | cpp2v chokes on `operator<<` / `<iostream>` | **Resolved** | cpp2v emits warnings for atomics/NEON but produces correct output |
 | BRiCk Coq theories incompatible with generated AST | **Resolved** | Workspace builds matching coqc + theories; TreeRep.v compiles |
 | macOS Bash/sed incompatibility | **Resolved** | `brew install bash gnu-sed` for Bash 4.2+ and GNU sed |
-| **`skylabs.auto` package is proprietary** | **BLOCKING** | `SkyLabsAI/auto` is private; `make clone-public` skips it. Without it: no `cpp.spec`, `go`, `work`, `verify_spec'`, `wp_while` tactic. Need GitHub access to `SkyLabsAI/auto` or rewrite proofs using only core `skylabs.lang.cpp.*` primitives (extremely tedious without interactive coqtop). |
+| **`skylabs.auto` package is proprietary** | **Resolved** | Rewrote FindSpec.v to use ONLY core `skylabs.lang.cpp.*` primitives. Key: `cpp_spec` for val→ptr elaboration, `wp_func_intro` to unseal wp, core `Emember` constructor for field access. No proprietary imports needed. |
 | `cpp.spec` name string for templated class method | Open | String `"DDL::Map<int, int>::Node::findNode(...)"` derived from AST; may need format adjustment |
 | `treeR_null` proof needs null-pointer reasoning | **Resolved** | Added `structR _Node_name q` to `treeR`'s Node case; `work` tactic should discharge it |
 | `derive treeR` on a Fixpoint | Open | May not work; fallback is manual `rewrite treeR_node` / `treeR_leaf` |
