@@ -37,9 +37,11 @@ GEN_AST   := $(COQ_DIR)/map_int_int_cpp.v
 GEN_NAMES := $(COQ_DIR)/map_int_int_cpp_names.v
 
 # Coq source files (order matters for dependency chain)
+# Note: FindSpec_draft.v is a prototype proof against a hand-transcribed AST.
+# It is NOT built by default because it doesn't reference the actual generated
+# code. A real FindSpec.v must extract the function from source's symbol table.
 COQ_SRCS := $(COQ_DIR)/RBTree.v \
             $(COQ_DIR)/TreeRep.v \
-            $(COQ_DIR)/FindSpec.v \
             $(COQ_DIR)/InsertSpec.v \
             $(COQ_DIR)/RefCount.v \
             $(COQ_DIR)/Invariants.v
@@ -86,11 +88,6 @@ $(COQ_DIR)/RBTree.vo: $(COQ_DIR)/RBTree.v
 $(COQ_DIR)/TreeRep.vo: $(COQ_DIR)/TreeRep.v $(COQ_DIR)/RBTree.vo
 	$(COQC) $(COQFLAGS) $<
 
-# FindSpec imports map_int_int_cpp for the cpp.spec function name resolution
-# and the verify[source] proof scaffold.
-$(COQ_DIR)/FindSpec.vo: $(COQ_DIR)/FindSpec.v $(COQ_DIR)/RBTree.vo $(COQ_DIR)/TreeRep.vo $(COQ_DIR)/map_int_int_cpp.vo
-	$(COQC) $(COQFLAGS) $<
-
 $(COQ_DIR)/InsertSpec.vo: $(COQ_DIR)/InsertSpec.v $(COQ_DIR)/RBTree.vo $(COQ_DIR)/TreeRep.vo
 	$(COQC) $(COQFLAGS) $<
 
@@ -101,7 +98,7 @@ $(COQ_DIR)/Invariants.vo: $(COQ_DIR)/Invariants.v $(COQ_DIR)/RBTree.vo
 	$(COQC) $(COQFLAGS) $<
 
 proofs: $(COQ_DIR)/RBTree.vo $(COQ_DIR)/TreeRep.vo \
-        $(COQ_DIR)/FindSpec.vo $(COQ_DIR)/InsertSpec.vo \
+        $(COQ_DIR)/InsertSpec.vo \
         $(COQ_DIR)/RefCount.vo $(COQ_DIR)/Invariants.vo
 
 # ---- Cleanup ----
