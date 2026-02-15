@@ -54,6 +54,7 @@ Require Import skylabs.iris.extra.proofmode.proofmode.
 Import cQp_compat.
 
 Require Import daedalus_rb.TreeRep.
+Require Import daedalus_rb.Tactics.
 Require Import daedalus_rb.map_int_int_cpp.
 
 (** ** Function extraction from the actual generated AST
@@ -215,23 +216,9 @@ Proof using MOD.
       rewrite /nd_seq.
       iSplit.
       + (** Left ordering: evaluate [curr] first, then [nullptr]. *)
-        iApply wp_operand_cast_l2r.
-        rewrite /wp_glval /=.
-        iApply wp_lval_var.
-        rewrite /read_decl /_local /=.
-        iDestruct (observe (reference_to _ _) with "Hcurr") as "#Href_cv".
-        iFrame "Href_cv".
-        iExists (Vptr cv).
-        iSplit.
-        { iExists (cQp.m 1).
-          rewrite _at_initializedR.
-          iDestruct (observe (has_type_or_undef _ _) with "Hcurr") as "#Hty_cv".
-          iRevert "Hty_cv". rewrite has_type_or_undef_unfold.
-          iIntros "[H | %Habs]"; [| discriminate].
-          iFrame "Hcurr". iExact "H". }
+        wp_read_local "Hcurr" (Vptr cv).
         (** Evaluate [nullptr]. *)
-        iApply wp_operand_cast_null; [reflexivity | reflexivity |].
-        iApply wp_null.
+        wp_null_val.
         (** Case-split on subtree structure. *)
         destruct tc as [| c_tc l_tc kn_tc vn_tc r_tc].
         ++ (** Leaf: [cv = nullptr], comparison yields false → [Sbreak]. *)
@@ -271,8 +258,7 @@ Proof using MOD.
            rewrite /get_return_type /=.
            rewrite /wp_initialize /qual_norm wp_initialize_unqualified.unlock /=.
            (** Return expression is [Ecast Cnull2ptr Enull] = nullptr. *)
-           iApply wp_operand_cast_null; [reflexivity | reflexivity |].
-           iApply wp_null.
+           wp_null_val.
            (** Wand: [ret_p |-> tptsto_fuzzyR ... (Vptr nullptr) -* ...]. *)
            iIntros "Hret_store".
            (** Process [interp source FreeTemps.id (▷ ...)]. *)
@@ -311,8 +297,8 @@ Proof using MOD.
            (** Need [pv |-> anyR Tint 1$m ** pv0 |-> anyR (Tptr _Node) 1$m].
                Convert tptsto_fuzzyR to anyR via entailment. *)
            iSplitL "Hpk".
-           { by rewrite anyR_tptsto_fuzzyR_val_2. }
-           by rewrite anyR_tptsto_fuzzyR_val_2.
+           { wp_finish_anyR. }
+           wp_finish_anyR.
         ++ (** Node: [cv <> nullptr], comparison yields true → body. *)
            (** Extract [valid_ptr cv] from [treeR (Node ...)] via [structR].
                Unfold treeR to expose the struct assertion, then observe. *)
@@ -348,10 +334,7 @@ Proof using MOD.
              rewrite /eval_binop.
              iFrame "Htrue". iRight. iExact "Himpure". }
            (** Strip [interp] + enter [Sseq [Sif ...]]. *)
-           do 2 rewrite interp_unfold. iModIntro.
-           iApply wp_seq.
-           rewrite wp_block_eq /wp_block_def.
-           do 2 iModIntro. iNext. iModIntro.
+           wp_enter_block.
            (** Inner [Sif]: test [k < curr->key]. *)
            iApply (wp_if source).
            iNext.
@@ -369,20 +352,7 @@ Proof using MOD.
            rewrite /nd_seq.
            iSplit.
            { (** Left ordering: eval [k], then [curr->key]. *)
-             iApply wp_operand_cast_l2r.
-             rewrite /wp_glval /=.
-             iApply wp_lval_var.
-             rewrite /read_decl /_local /=.
-             iDestruct (observe (reference_to _ _) with "Hpk") as "#Href_k".
-             iFrame "Href_k".
-             iExists (Vint k).
-             iSplit.
-             { iExists (cQp.m 1).
-               rewrite _at_initializedR.
-               iDestruct (observe (has_type_or_undef _ _) with "Hpk") as "#Hty_k".
-               iRevert "Hty_k". rewrite has_type_or_undef_unfold.
-               iIntros "[H | %Habs]"; [| discriminate].
-               iFrame "Hpk". iExact "H". }
+             wp_read_local "Hpk" (Vint k).
              (** Now eval [curr->key]. *)
              admit. }
            (** Right ordering: symmetric. *)
