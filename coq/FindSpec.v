@@ -109,8 +109,16 @@ Lemma treeR_null q' t' : nullptr |-> treeR q' t' |-- [| t' = Leaf |].
 Proof.
   destruct t'.
   - rewrite treeR_leaf. auto.
-  - rewrite treeR_node.
-Admitted.
+  - rewrite treeR_node _at_as_Rep.
+    iIntros "H".
+    iDestruct "H" as (lp rp rc) "(Htl & Htr & Hnode)".
+    (** Decompose the [_at] over [∗] to isolate [structR], then
+        derive a contradiction from [nonnullR] at [nullptr]. *)
+    iDestruct "Hnode" as "(Hrc & Hcolor & Hkey & Hval & Hleft & Hright & Hstruct)".
+    iDestruct (observe (nullptr |-> nonnullR) with "Hstruct") as "Hnn".
+    rewrite _at_nonnullR.
+    by iDestruct "Hnn" as %[].
+Qed.
 
 Lemma treeR_leaf_implies_null q' (p : ptr) :
   p |-> treeR q' (Leaf (K:=Z) (V:=Z)) |-- [| p = nullptr |].
@@ -195,8 +203,192 @@ Proof using MOD.
             pv0 |-> anyR (Tptr _Node) (cQp.m 1) **
             ra |-> tptsto_fuzzyR (Tptr _Node) (cQp.m 1) (Vptr ret) -*
             Q ra))%I).
-    { (** Inductive step. *)
-      admit. }
+    { (** Inductive step: [I ⊢ while_unroll ...]. *)
+      iIntros "HI".
+      iDestruct "HI" as (cv tc)
+        "(Hcurr & Hpk & Hpn & Htree_cv & %Hcorr & Hwand & Hcont)".
+      rewrite /while_unroll.
+      iApply (wp_if source).
+      iNext.
+      (** Decompose [Ebinop Bneq] via [wp_operand_binop]. *)
+      iApply (wp_operand_binop source).
+      rewrite /nd_seq.
+      iSplit.
+      + (** Left ordering: evaluate [curr] first, then [nullptr]. *)
+        iApply wp_operand_cast_l2r.
+        rewrite /wp_glval /=.
+        iApply wp_lval_var.
+        rewrite /read_decl /_local /=.
+        iDestruct (observe (reference_to _ _) with "Hcurr") as "#Href_cv".
+        iFrame "Href_cv".
+        iExists (Vptr cv).
+        iSplit.
+        { iExists (cQp.m 1).
+          rewrite _at_initializedR.
+          iDestruct (observe (has_type_or_undef _ _) with "Hcurr") as "#Hty_cv".
+          iRevert "Hty_cv". rewrite has_type_or_undef_unfold.
+          iIntros "[H | %Habs]"; [| discriminate].
+          iFrame "Hcurr". iExact "H". }
+        (** Evaluate [nullptr]. *)
+        iApply wp_operand_cast_null; [reflexivity | reflexivity |].
+        iApply wp_null.
+        (** Case-split on subtree structure. *)
+        destruct tc as [| c_tc l_tc kn_tc vn_tc r_tc].
+        ++ (** Leaf: [cv = nullptr], comparison yields false → [Sbreak]. *)
+           iDestruct (treeR_leaf_implies_null with "Htree_cv") as "%Hnull".
+           subst cv.
+           iExists (Vbool false). rewrite /Vbool /=.
+           iSplit.
+           { (** [eval_binop Bneq (Vptr nullptr) (Vptr nullptr) (Vint 0) ∗ True]
+                 Strategy: build [eval_binop_impure ... ∗ True] via pointer
+                 equality lemmas, then embed into [eval_binop] disjunction. *)
+             iPoseProof valid_ptr_nullptr as "Hvn".
+             iPoseProof (eval_ptr_self_eq source _Node nullptr with "Hvn")
+               as "Heq".
+             iPoseProof (eval_ptr_neq source _Node nullptr nullptr true
+               with "Heq") as "[Himpure Htrue]".
+             rewrite /eval_binop.
+             iFrame "Htrue". iRight. iExact "Himpure". }
+           (** [Sbreak] → loop exit → return nullptr.
+               Leaf means [findNode k tc = None], so [findNode k t = None]
+               by Hcorr. *)
+           (** Process false branch → [Sbreak] exits while loop. *)
+           rewrite ?interp_unfold /=.
+           iApply wp_break.
+           (** Strip modalities after break (just one |={⊤}=>). *)
+           iModIntro.
+           (** Now at [Q_outer Normal]: strip [|={⊤}=> ▷ Kloop ...]. *)
+           iModIntro. iNext.
+           (** [Kloop_inner (|> I) Q Normal = I] — loop restarts? No,
+               after Break we should be at [Q Normal]. The [Kloop] here
+               is from [wp_while_inv]'s recursion structure.
+               Try unfolding Kloop to reduce. *)
+           rewrite /Kloop /Kloop_inner /=.
+           (** Process [return curr;] (= return nullptr for Leaf case). *)
+           iApply wp_return.
+           iModIntro. iNext. iModIntro.
+           iIntros (ret_p).
+           rewrite /get_return_type /=.
+           rewrite /wp_initialize /qual_norm wp_initialize_unqualified.unlock /=.
+           (** Return expression is [Ecast Cnull2ptr Enull] = nullptr. *)
+           iApply wp_operand_cast_null; [reflexivity | reflexivity |].
+           iApply wp_null.
+           (** Wand: [ret_p |-> tptsto_fuzzyR ... (Vptr nullptr) -* ...]. *)
+           iIntros "Hret_store".
+           (** Process [interp source FreeTemps.id (▷ ...)]. *)
+           rewrite ?interp_unfold /=.
+           (** Strip modalities. *)
+           iModIntro. iNext. iModIntro. iModIntro.
+           (** Unfold Kfree/Kcleanup/Kreturn: reduces to
+               [interp source frees (wp_make_mutables source [] (▷ Q ret_p))]. *)
+           rewrite /Kfree /Kat_exit /Kcleanup /Kreturn /Kreturn_inner /=.
+           (** Process [interp source (1 >*> FreeTemps.delete ... curr_p) ...]:
+               first interp id, then destroy curr_p. *)
+           rewrite ?interp_unfold /=.
+           (** Strip modalities and provide resources for destruction. *)
+           repeat iModIntro.
+           (** [destroy_val source (Tptr _Node) curr_p (▷ Q ret_p)].
+               Unfold to [wp_destroy_prim]: needs
+               [|={⊤}=> (∃ v, curr_p |-> tptstoR ... v) ** (▷ Q ret_p)]. *)
+           destroy_val_unfold.
+           rewrite wp_destroy_prim.unlock /=.
+           iModIntro.
+           iSplitL "Hcurr".
+           { (** Provide [curr_p |-> tptstoR] from [Hcurr]. *)
+             iRevert "Hcurr". rewrite _at_tptsto_fuzzyR.
+             iIntros "(%v' & %Hrel & Htpsto)".
+             iExists v'. rewrite _at_tptstoR. iExact "Htpsto". }
+           (** Now prove [▷ Q ret_p] using invariant resources. *)
+           iNext.
+           (** Reconstruct the tree via magic wand. *)
+           iAssert (nullptr |-> treeR q Leaf)%I as "Htree_leaf".
+           { rewrite treeR_leaf _at_as_Rep. auto. }
+           iDestruct ("Hwand" with "Htree_leaf") as "Htree".
+           (** Apply postcondition handler [Hcont] with ret=nullptr, ra=ret_p. *)
+           iApply ("Hcont" $! nullptr with "[Htree]").
+           { iFrame "Htree". iPureIntro. rewrite Hcorr. reflexivity. }
+           iFrame "Hret_store".
+           (** Need [pv |-> anyR Tint 1$m ** pv0 |-> anyR (Tptr _Node) 1$m].
+               Convert tptsto_fuzzyR to anyR via entailment. *)
+           iSplitL "Hpk".
+           { by rewrite anyR_tptsto_fuzzyR_val_2. }
+           by rewrite anyR_tptsto_fuzzyR_val_2.
+        ++ (** Node: [cv <> nullptr], comparison yields true → body. *)
+           (** Extract [valid_ptr cv] from [treeR (Node ...)] via [structR].
+               Unfold treeR to expose the struct assertion, then observe. *)
+           iRevert "Htree_cv". rewrite treeR_node _at_as_Rep. iIntros "Htree_cv".
+           iDestruct "Htree_cv" as (lp_tc rp_tc rc_tc)
+             "(Htree_l & Htree_r & Hnode_cv)".
+           (** Decompose the [_at] over [∗] to isolate [structR], then
+               observe [validR] and [nonnullR] from it. *)
+           iDestruct "Hnode_cv" as "(Hrc_cv & Hcolor_cv & Hkey_cv & Hval_cv & Hleft_cv & Hright_cv & Hstruct_cv)".
+           iDestruct (observe (cv |-> validR) with "Hstruct_cv") as "#Hvalid_cv".
+           rewrite _at_validR.
+           iDestruct (observe (cv |-> nonnullR) with "Hstruct_cv") as "#Hnonnull_cv".
+           (** Re-fold [treeR] for later use. *)
+           iAssert (cv |-> treeR q (Node c_tc l_tc kn_tc vn_tc r_tc))%I
+             with "[Htree_l Htree_r Hrc_cv Hcolor_cv Hkey_cv Hval_cv Hleft_cv Hright_cv Hstruct_cv]" as "Htree_cv".
+           { rewrite treeR_node _at_as_Rep.
+             iExists lp_tc, rp_tc, rc_tc.
+             iFrame "Htree_l Htree_r Hrc_cv Hcolor_cv Hkey_cv Hval_cv Hleft_cv Hright_cv Hstruct_cv". }
+           (** Extract [cv ≠ nullptr] from nonnullR for the eval_binop proof. *)
+           iRevert "Hnonnull_cv". rewrite _at_nonnullR. iIntros "%Hcv_ne".
+           iExists (Vbool true). rewrite /Vbool /=.
+           iSplit.
+           { (** [eval_binop Bneq (Vptr cv) (Vptr nullptr) (Vbool true) ∗ True]
+                 Use [eval_ptr_nullptr_eq_l]: cv ≠ nullptr (from nonnullR)
+                 and valid_ptr cv (from structR) to show Beq yields false,
+                 then eval_ptr_neq flips to Bneq yields true (negb false). *)
+             iPoseProof (eval_ptr_nullptr_eq_l source
+               (fun _ : is_Some (ptr_vaddr cv) =>
+                  bool_decide_eq_false_2 (cv = nullptr) Hcv_ne)
+               with "Hvalid_cv") as "Heq".
+             iPoseProof (eval_ptr_neq source _Node cv nullptr false
+               with "Heq") as "[Himpure Htrue]".
+             rewrite /eval_binop.
+             iFrame "Htrue". iRight. iExact "Himpure". }
+           (** Strip [interp] + enter [Sseq [Sif ...]]. *)
+           do 2 rewrite interp_unfold. iModIntro.
+           iApply wp_seq.
+           rewrite wp_block_eq /wp_block_def.
+           do 2 iModIntro. iNext. iModIntro.
+           (** Inner [Sif]: test [k < curr->key]. *)
+           iApply (wp_if source).
+           iNext.
+           (** Unfold [treeR (Node ...)] to access fields.
+               Note: [treeR_node] fails because [treeR] is a Fixpoint and
+               Coq has already ι-reduced [treeR q (Node ...)]. We only
+               need [_at_as_Rep] to unfold the outer [_at]. *)
+           iRevert "Htree_cv". rewrite _at_as_Rep. iIntros "Htree_cv".
+           iDestruct "Htree_cv" as (lp2 rp2 rc2)
+             "(Htree_l & Htree_r & Hnode)".
+           iDestruct "Hnode" as
+             "(Hrc & Hcolor & Hkey & Hval & Hleft & Hright & Hstruct)".
+           (** Evaluate [k < curr->key] via [wp_operand_binop]. *)
+           iApply (wp_operand_binop source).
+           rewrite /nd_seq.
+           iSplit.
+           { (** Left ordering: eval [k], then [curr->key]. *)
+             iApply wp_operand_cast_l2r.
+             rewrite /wp_glval /=.
+             iApply wp_lval_var.
+             rewrite /read_decl /_local /=.
+             iDestruct (observe (reference_to _ _) with "Hpk") as "#Href_k".
+             iFrame "Href_k".
+             iExists (Vint k).
+             iSplit.
+             { iExists (cQp.m 1).
+               rewrite _at_initializedR.
+               iDestruct (observe (has_type_or_undef _ _) with "Hpk") as "#Hty_k".
+               iRevert "Hty_k". rewrite has_type_or_undef_unfold.
+               iIntros "[H | %Habs]"; [| discriminate].
+               iFrame "Hpk". iExact "H". }
+             (** Now eval [curr->key]. *)
+             admit. }
+           (** Right ordering: symmetric. *)
+           admit.
+      + (** Right ordering: symmetric to left. *)
+        admit. }
     (** Establish invariant. *)
     iExists n, t.
     iFrame "Hcurr Hpk Hpn Htree Hcont".
