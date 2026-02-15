@@ -152,6 +152,11 @@ Proof.
        contradicting nullptr. Needs manual Iris proof. *)
 Admitted.
 
+(** *** Helper: Leaf tree forces null pointer *)
+Lemma treeR_leaf_implies_null q' (p : ptr) :
+  p |-> treeR q' (Leaf (K:=Z) (V:=Z)) |-- [| p = nullptr |].
+Proof. rewrite treeR_leaf _at_as_Rep. auto. Qed.
+
 (** *** Function specification
 
     [findNode] is a static method on [DDL::Map<int,int>::Node], so
@@ -433,7 +438,83 @@ Proof using MOD.
           - [wp_lval_member source] (expr.v) — field access
           - [wp_lval_assign source] (expr.v) — assignment [curr = curr->left]
           - [wp_return source] (stmt.v) — [return curr] in the found case *)
-      admit. }
+      (** Step 1: Decompose [Ebinop Bneq] via [wp_operand_binop]. *)
+      iApply (wp_operand_binop source).
+      (** Goal: [nd_seq (wp_operand lhs) (wp_operand rhs) (fun '(v1,v2) free => ...)].
+          [nd_seq] = [P //\\ Q] — prove both evaluation orderings. *)
+      rewrite /nd_seq.
+      (** [nd_seq] unfolds to [//\\] (bi_and): prove both eval orderings. *)
+      iSplit.
+      + (** Left ordering: evaluate [curr] first, then [nullptr]. *)
+        (** Read [curr]: [Ecast Cl2r (Evar "curr" (Tptr _Node))]. *)
+        iApply wp_operand_cast_l2r.
+        rewrite /wp_glval /=.
+        iApply wp_lval_var.
+        rewrite /read_decl /_local /=.
+        (** Need [reference_to] and [has_type] from [Hcurr]. *)
+        iDestruct (observe (reference_to _ _) with "Hcurr") as "#Href_cv".
+        iFrame "Href_cv".
+        iExists (Vptr cv).
+        iSplit.
+        { (** Prove value exists at [curr_p]. *)
+          iExists (cQp.m 1).
+          rewrite _at_initializedR.
+          iDestruct (observe (has_type_or_undef _ _) with "Hcurr") as "#Hty_cv".
+          iRevert "Hty_cv". rewrite has_type_or_undef_unfold.
+          iIntros "[H | %Habs]"; [| discriminate].
+          iFrame "Hcurr". iExact "H". }
+        (** Right of [//\\]: continue with [v1 = Vptr cv].
+            [Hcurr] is still available (both branches of [//\\] get
+            the full spatial context in affine BI).
+            Now evaluate [nullptr]: [Ecast (Cnull2ptr _) Enull]. *)
+        iApply wp_operand_cast_null; [reflexivity | reflexivity |].
+        iApply wp_null.
+        (** Now at [eval_binop] + [wp_test] continuation:
+              [Exists v', (eval_binop ... v' ** True) //\\
+                match is_true v' with Some c => K c free | None => ERROR end]
+            Case-split on subtree to determine the comparison result. *)
+        destruct tc as [| c_tc l_tc kn_tc vn_tc r_tc].
+        ++ (** Leaf: [cv = nullptr], comparison yields false → [Sbreak]. *)
+           iDestruct (treeR_leaf_implies_null with "Htree_cv") as "%Hnull".
+           subst cv.
+           iExists (Vbool false). rewrite /Vbool /=.
+           iSplit.
+           { (** [eval_binop Bneq (Vptr nullptr) (Vptr nullptr) (Vint 0)] *)
+             admit. }
+           (** [Sbreak] via [Kloop] → [K Normal] → return nullptr.
+               Leaf means [findNode k t = None] (from Hcorr).
+               TODO: process Sbreak, Kloop, Kseq, Sreturn_val. *)
+           admit.
+        ++ (** Node: [cv <> nullptr], comparison yields true → body. *)
+           iExists (Vbool true). rewrite /Vbool /=.
+           iSplit.
+           { (** [eval_binop Bneq (Vptr cv) (Vptr nullptr) (Vint 1)] *)
+             admit. }
+           (** Strip [interp source (1 >*> 1)] wrapper.
+               [1 >*> 1] = [FreeTemps.seq id id], unfolds via [interp_unfold]
+               to [|={⊤}=> |={⊤}=> wp ...]. *)
+           do 2 rewrite interp_unfold. iModIntro.
+           (** Enter [Sseq [Sif ...]]. *)
+           iApply wp_seq.
+           rewrite wp_block_eq /wp_block_def.
+           (** Strip [|={⊤}=> |={⊤}▷=> ...] = [|={⊤}=> |={⊤}=> ▷ |={⊤}=> ...]. *)
+           do 2 iModIntro. iNext. iModIntro.
+           (** Now: [wp ρ' (Sif None test thn els) (Kseq (wp_block []) (|={⊤}=> K))].
+               Apply [wp_if] for the inner test [k < curr->key]. *)
+           iApply (wp_if source).
+           iNext.
+           (** Now: [wp_test] (auto-unfolds to [wp_operand]) of:
+                 [Ebinop Blt (Ecast Cl2r (Evar "k" Tint))
+                             (Ecast Cl2r (Emember true (Evar "curr" _) "key" _ Tint))
+                             Tbool]
+               Three branches after evaluating and case-splitting:
+               1. [k < kn_tc] → [curr = curr->left], continue loop
+               2. [kn_tc < k] → inner else → [curr = curr->right], continue loop
+               3. [k = kn_tc] → inner else else → [return curr]
+               TODO: Phase F.2 — evaluate test, branch, complete. *)
+           admit.
+      + (** Right ordering: evaluate [nullptr] first, then [curr]. *)
+        admit. }
     (** Establish the invariant from the current spatial resources.
         Initial values: [cv = n] (curr starts at n), [tc = t] (full tree). *)
     iExists n, t.

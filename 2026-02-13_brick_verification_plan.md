@@ -1,7 +1,7 @@
 # BRiCk Verification Plan for Daedalus Red-Black Tree
 
 *Created: 2026-02-13*
-*Updated: 2026-02-14 — Phase 4 at loop invariant applied; Phases A-E of plan complete (spec, func_ok, decl processing, wp_while_inv with magic-wand invariant). Inductive step (Phase F) next.*
+*Updated: 2026-02-15 — Phase F in progress: test expression evaluated, case-split on tree structure, reached inner Sif for loop body branches.*
 
 ## Motivation
 
@@ -187,10 +187,29 @@ establish the functional spec is correct. We:
   - Initial establishment: `curr_val = n`, `t_curr = t`, identity wand
   - `wp_while_inv source I` takes `tu : translation_unit` as first explicit arg
   - Inductive step scaffolded with `admit` (Phase F)
+- [x] Process test expression `curr != nullptr` (2026-02-15)
+  - `wp_operand_binop source` decomposes `Ebinop Bneq` via `nd_seq`
+  - `nd_seq` unfolds to `//\\` (bi_and): both eval orderings needed
+  - `iSplit` handles both orderings; right ordering admitted for now
+  - Left ordering: `wp_operand_cast_l2r` + `wp_lval_var` reads `curr`;
+    `wp_operand_cast_null` + `wp_null` evaluates `nullptr` to `Vptr nullptr`
+  - Case-split on `tc` (tree at current position):
+    - `Leaf`: `treeR_leaf_implies_null` extracts `cv = nullptr`;
+      `iExists (Vbool false)`, `is_true (Vint 0) = Some false` → `Sbreak`
+    - `Node`: `iExists (Vbool true)`, `is_true (Vint 1) = Some true` → body
+  - Key finding: `Vbool b = Vint (if b then 1 else 0)` (not a separate constructor)
+  - Key finding: `is_true (Vint i) = Some (bool_decide (i ≠ 0))` — auto-reduces
+  - `treeR_leaf_implies_null` lemma added (uses `_at_as_Rep`)
+- [x] Process `interp` + `Sseq` + reach inner `Sif` in Node case (2026-02-15)
+  - `do 2 rewrite interp_unfold. iModIntro.` strips `interp source (1>*>1)`
+  - `iApply wp_seq. rewrite wp_block_eq /wp_block_def.` enters Sseq
+  - `do 2 iModIntro. iNext. iModIntro.` strips `|={⊤}=> |={⊤}▷=>`
+  - `iApply (wp_if source). iNext.` reaches the inner test
 - [ ] Complete loop body proof (left/right/found branches)
-  - Next: `wp_operand_binop` for `Bneq` test, `nd_seq` for eval order,
-    `eval_ptr_neq`/`eval_ptr_eq` for pointer comparison,
-    `wp_operand_cast_null` for nullptr, then branch on `is_true`
+  - Leaf/break case: Sbreak → Kloop → K Normal → return nullptr (admitted)
+  - Node case: three branches for `k < key`, `key < k`, `k = key` (admitted)
+  - eval_binop proofs for Bneq and Blt (admitted)
+  - Right ordering of nd_seq (admitted — symmetric to left)
 - [ ] Loop exit + return nullptr
 - [ ] Clean up, reduce Admitted count
 
