@@ -59,10 +59,11 @@ Context `{Sigma : cpp_logic} {CU : genv}.
     Field names from the cpp2v-generated [map_int_int_cpp_names.v].
     The struct is [DDL::Map<int,int>::Node]. *)
 
-(** The [Node] struct type (for pointer representations). *)
-Definition _Node : type :=
-  Tnamed (Nscoped (Ninst (Nscoped (Nglobal (Nid "DDL")) (Nid "Map"))
-            ((Atype Tint) :: (Atype Tint) :: nil)) (Nid "Node")).
+(** The [Node] struct name and type (for pointer representations). *)
+Definition _Node_name : globname :=
+  Nscoped (Ninst (Nscoped (Nglobal (Nid "DDL")) (Nid "Map"))
+            ((Atype Tint) :: (Atype Tint) :: nil)) (Nid "Node").
+Definition _Node : type := Tnamed _Node_name.
 
 (** Field offsets within [Node]. *)
 Definition _ref_count := _field "DDL::Map<int,int>::Node::ref_count".
@@ -93,7 +94,13 @@ Definition color_to_bool (c : Color) : bool :=
       contents, and recurse into the subtrees.
 
     The [ref_count] field is existentially quantified since it is a
-    runtime bookkeeping value not tracked by the functional spec. *)
+    runtime bookkeeping value not tracked by the functional spec.
+
+    [structR _Node_name q] asserts the struct's identity and implies
+    [nonnullR] (the pointer is non-null). This is required for
+    BRiCk's automation to derive contradictions when a [Node] is
+    asserted at [nullptr], following the pattern from [nodeR] in
+    the linked list demo. *)
 Fixpoint treeR (q : Qp) (t : tree Z Z) : Rep :=
   as_Rep (fun this =>
     match t with
@@ -108,7 +115,8 @@ Fixpoint treeR (q : Qp) (t : tree Z Z) : Rep :=
                   _key       |-> intR q k **
                   _value     |-> intR q v **
                   _left      |-> ptrR<_Node> q lp **
-                  _right     |-> ptrR<_Node> q rp)
+                  _right     |-> ptrR<_Node> q rp **
+                  structR _Node_name q)
     end).
 
 (** ** Characterization lemmas
@@ -130,7 +138,8 @@ Lemma treeR_node q c l k v r :
               _key       |-> intR q k **
               _value     |-> intR q v **
               _left      |-> ptrR<_Node> q lp **
-              _right     |-> ptrR<_Node> q rp)).
+              _right     |-> ptrR<_Node> q rp **
+              structR _Node_name q)).
 Proof. reflexivity. Qed.
 
 End with_Sigma.

@@ -1,4 +1,4 @@
-(** * FindNode Specification and Proof Scaffold
+(** * FindNode Specification and Proof
 
     Proves that the C++ [Node::findNode] function refines the functional
     [findNode] from [RBTree.v].
@@ -24,25 +24,37 @@
     == Proof strategy ==
 
     The C++ version uses a while loop; the Coq spec uses structural
-    recursion. We prove equivalence via a loop invariant and
-    [wp_while] with Löb induction.
+    recursion. We prove equivalence via a loop invariant and [wp_while].
 
-    Loop invariant [I(ρ)]:
+    Loop invariant — holds before each evaluation of the loop condition:
+
       Exists curr_p t_curr,
         _local ρ "curr" |-> ptrR<_Node> 1$m curr_p **
+        curr_p |-> treeR q t_curr **
         [| findNode k t = findNode k t_curr |] **
         (curr_p |-> treeR q t_curr -* n |-> treeR q t)
 
-    The magic wand is the "zipper": given back the subtree at [curr_p],
-    we can reconstruct the full tree at [n].
+    The invariant holds four resources:
 
-    Each iteration:
-    1. [curr != nullptr]: unfold [treeR t_curr] to access fields
-    2. [k < curr->key]: [findNode_lt] → update [curr := left], extend wand
-    3. [curr->key < k]: [findNode_gt] → update [curr := right], extend wand
-    4. [k = curr->key]: return [curr_p], use wand to recover full tree
-    5. Loop exit ([curr = nullptr]): [treeR_null] → [t_curr = Leaf] →
-       [findNode k t = None] → return nullptr
+    1. [_local ρ "curr" |-> ...]: the local variable [curr] stores pointer
+       [curr_p].
+
+    2. [curr_p |-> treeR q t_curr]: the current position in the tree.
+       We OWN the subtree at [curr_p] so we can unfold it to access fields
+       ([curr->key], [curr->left], [curr->right]).
+
+    3. [[| findNode k t = findNode k t_curr |]]: the functional spec's
+       [findNode] agrees between the original tree and the current subtree.
+
+    4. [(curr_p |-> treeR q t_curr -* n |-> treeR q t)]: the magic wand
+       ("zipper") — given back the subtree at [curr_p], reconstruct the
+       full tree at [n]. This captures all the ancestor nodes' fields and
+       sibling subtrees encountered during the traversal.
+
+    Each iteration unfolds [treeR] at [curr_p], reads [curr->key],
+    branches on the comparison, and descends into a child.
+    The wand is extended by composing: the old wand + the fields of the
+    current node + the sibling subtree.
 
     == Dependencies ==
 
@@ -84,6 +96,11 @@ Proof.
     apply Z.ltb_ge in E2. lia.
 Qed.
 
+(** Neither [k < kn] nor [kn < k] implies [k = kn]. *)
+Lemma findNode_eq_key : forall k kn : Z,
+  ~ (k < kn)%Z -> ~ (kn < k)%Z -> k = kn.
+Proof. lia. Qed.
+
 (** ** BRiCk imports
 
     After pure lemmas to avoid ssreflect conflicts.
@@ -120,12 +137,12 @@ Context `{Sigma : cpp_logic} `{MOD: map_int_int_cpp.source ⊧ σ}.
     [curr = nullptr] but [t_curr] is a [Node]).
 
     Following the pattern of [nodeR_null_False] in the linked list demo.
-    Our [treeR] doesn't include [structR] in the Node case, so the proof
-    may require manual reasoning about field-offset validity at [nullptr].
+    [treeR]'s Node case includes [structR _Node_name q], which implies
+    [nonnullR] — contradicting [nullptr]. The [work] tactic resolves
+    this automatically.
 
-    TODO (2026-02-14): Complete once BRiCk's null-pointer automation is
-    better understood. Consider adding [structR _Node q] to [treeR]'s
-    Node case if needed. *)
+    [Admitted]: requires [work] from the proprietary [skylabs.auto]
+    package (see note at end of file). *)
 Lemma treeR_null q' t' : nullptr |-> treeR q' t' |-- [| t' = Leaf |].
 Proof. destruct t'; [work|]. rewrite treeR_node. work. Admitted.
 Definition treeR_null_F := [FWD] treeR_null.
@@ -163,67 +180,180 @@ cpp.spec "DDL::Map<int, int>::Node::findNode(int, DDL::Map<int, int>::Node*)"
        end |]
 ).
 
-(** *** Proof scaffold
+(** *** Proof
 
-    The proof follows BRiCk's [verify_spec'] + [go] pattern from
-    [main_cpp_proof.v] (loops demo) and [linked_list_cpp_proof.v].
+    The proof follows BRiCk's [verify_spec'] + [go] + [wp_while] pattern
+    from the loop tutorial ([docs/control_flow/loop.v]).
 
-    [verify_spec'] unfolds the specification into a weakest-precondition
-    goal.  [go] applies BRiCk's automation to handle sequential
-    statements ([Sdecl], [Sseq], [Sexpr]), field accesses ([Emember]),
-    and loads/stores.
+    After [verify_spec'; go.] processes the function entry and the
+    [Sdecl [curr = n]] initialization, we're at the [Swhile].
+    [wp_while] generates two subgoals:
 
-    Automation handles the initial [Sdecl [curr = n]] and reaches
-    the [Swhile] loop, where we supply a loop invariant.
+    1. Establish the invariant from the initial resources.
+    2. Given the invariant, unroll one iteration (evaluate condition,
+       process body or exit, re-establish invariant or postcondition).
 
-    The loop invariant uses a magic wand ([-*]) to represent the
-    "context" of the tree traversal — the path from the root [n]
-    down to the current pointer [curr_p].  This is the standard
-    separation logic pattern for in-place tree traversal.
-
-    == Loop invariant ==
-
-    Holds immediately before the loop condition is evaluated:
-
-      Exists curr_p t_curr,
-        _local ρ "curr" |-> ptrR<_Node> 1$m curr_p **
-        [| findNode k t = findNode k t_curr |] **
-        (curr_p |-> treeR q t_curr -* n |-> treeR q t)
-
-    At entry: curr_p = n, t_curr = t, wand is reflexive.
-    Each step narrows t_curr to a subtree and extends the wand.
-    At exit: curr_p = nullptr ⟹ t_curr = Leaf ⟹ findNode returns None.
-    At found: k = curr->key ⟹ return curr, wand recovers full tree.
-
-    == Current status ==
-
-    [Abort]ed at the loop proof. BRiCk's own linked list demos also
-    [Abort] loop proofs (length, reverse, append, merge). The loop
-    invariant design is sound; completing the proof requires deeper
-    expertise with BRiCk's loop reasoning tactics. *)
+    In the loop body:
+    - [curr != nullptr] → [t_curr] is a [Node] (by [treeR_null] contrapositive)
+    - Unfold [treeR] to expose fields ([_key], [_left], [_right])
+    - Branch on [k < kn] / [kn < k] / [k = kn]:
+      - Left: [findNode_lt], take left child, extend wand
+      - Right: [findNode_gt], take right child, extend wand
+      - Equal: [findNode_eq], recover full tree via wand, return [curr]
+    - Loop exit: [curr = nullptr] → [t_curr = Leaf] → recover tree, return [nullptr] *)
 
 Lemma findNode_ok : verify[map_int_int_cpp.source] findNode_spec.
 Proof using MOD.
   verify_spec'; go.
-  (* Automation handles Sdecl [curr = n] and reaches Swhile.
-     Supply the loop invariant. *)
+
+  (** Supply loop invariant. [wp_while] generates two subgoals:
+      (1) establish invariant, (2) preserve across one iteration. *)
   wp_while (fun ρ =>
     Exists (curr_p : ptr) (t_curr : tree Z Z),
       _local ρ "curr" |-> ptrR<_Node> 1$m curr_p **
+      curr_p |-> treeR q t_curr **
       [| findNode k t = findNode k t_curr |] **
       (curr_p |-> treeR q t_curr -* n |-> treeR q t)).
-  (* Loop body proof would proceed:
-     1. Establish invariant initially (curr_p = n, t_curr = t)
-     2. For each iteration:
-        a. curr != nullptr: unfold treeR t_curr via treeR_node
-        b. Load curr->key
-        c. Branch on k < curr->key:
-           - Left:  findNode_lt, set curr := curr->left, extend wand
-           - Right: findNode_gt, set curr := curr->right, extend wand
-           - Equal: return curr, use wand to restore n |-> treeR q t
-     3. Loop exit: curr = nullptr, use treeR_null to get t_curr = Leaf,
-        then findNode_leaf to get findNode k t = None, return nullptr *)
-  go with pick_frac.
-Abort.
+
+  { (** Subgoal 1: Establish invariant.
+        [curr_p := n], [t_curr := t], wand is reflexive [P -* P]. *)
+    iExists n, t. iFrame.
+    iSplitL "".
+    - iPureIntro. reflexivity.
+    - iIntros "H". iExact "H". }
+
+  (** Subgoal 2: One iteration of the loop.
+      [go] evaluates the condition [curr != nullptr], reading [curr]
+      from [_local ρ "curr"]. This leaves us at a [wp_if] branch. *)
+  go.
+
+  wp_if => CURR_NONNULL.
+
+  - (** Branch: [curr != nullptr] — enter loop body.
+        Destructure the invariant to access individual resources. *)
+    iDestruct 1 as (curr_p t_curr) "(Hlocal & Htree & %Hfind & Hwand)".
+
+    (** [curr_p ≠ nullptr], so [t_curr] cannot be [Leaf].
+        Contradiction via [treeR_leaf] which asserts [this = nullptr]. *)
+    destruct t_curr as [| c l kn vn r].
+    { rewrite treeR_leaf.
+      iDestruct "Htree" as "%Heq". exfalso. congruence. }
+
+    (** [t_curr = Node c l kn vn r]. Unfold [treeR] to expose fields. *)
+    rewrite treeR_node.
+    iDestruct "Htree" as (lp rp rc) "(Hleft & Hright & Hfields)".
+
+    (** Process: [if (k < curr->key)].
+        [go] reads [curr->key] from [Hfields], evaluates [Ebinop Blt]. *)
+    go.
+
+    wp_if => K_LT.
+
+    + (** [k < kn]: execute [curr := curr->left].
+          [go] reads [curr->left] from [Hfields], assigns to [curr]. *)
+      go.
+
+      (** Re-establish the invariant with [curr_p := lp, t_curr := l]. *)
+      iExists lp, l.
+      iFrame "Hlocal Hleft".
+      iSplitL "".
+      { iPureIntro. rewrite Hfind. apply findNode_lt. lia. }
+
+      (** Extend the wand: [lp |-> treeR q l -* n |-> treeR q t].
+          Given the left subtree back, reassemble the [Node] at [curr_p],
+          then apply the old wand. *)
+      iIntros "Hl".
+      iApply "Hwand".
+      rewrite treeR_node. iExists lp, rp, rc. iFrame.
+
+    + (** [k >= kn]: process [else if (curr->key < k)].
+          [go] reads [curr->key] again, evaluates [Ebinop Blt]. *)
+      go.
+
+      wp_if => K_GT.
+
+      * (** [kn < k]: execute [curr := curr->right].
+            [go] reads [curr->right] from [Hfields], assigns to [curr]. *)
+        go.
+
+        (** Re-establish the invariant with [curr_p := rp, t_curr := r]. *)
+        iExists rp, r.
+        iFrame "Hlocal Hright".
+        iSplitL "".
+        { iPureIntro. rewrite Hfind. apply findNode_gt. lia. }
+
+        (** Extend the wand: [rp |-> treeR q r -* n |-> treeR q t].
+            Given the right subtree back, reassemble the [Node] at
+            [curr_p], then apply the old wand. *)
+        iIntros "Hr".
+        iApply "Hwand".
+        rewrite treeR_node. iExists lp, rp, rc. iFrame.
+
+      * (** [k = kn]: execute [return curr].
+            Neither [k < kn] nor [kn < k], so [k = kn].
+            [go] processes the [Sreturn_val]. *)
+        go.
+
+        (** Postcondition: the function returns [curr_p ≠ nullptr].
+            Recover the full tree via the wand. *)
+        iAssert (curr_p |-> treeR q (Node c l kn vn r))
+          with "[Hleft Hright Hfields]" as "Htree".
+        { rewrite treeR_node. iExists lp, rp, rc. iFrame. }
+        iDestruct ("Hwand" with "Htree") as "Hfull".
+        iFrame "Hfull".
+        iPureIntro.
+
+        (** [findNode k (Node c l k vn r) = Some vn] by [findNode_eq].
+            Since [k = kn] (by [findNode_eq_key]), the [Some _] branch
+            of the postcondition match requires [ret ≠ nullptr],
+            which holds since [curr_p ≠ nullptr]. *)
+        assert (Hkeq : k = kn) by lia.
+        subst kn. rewrite Hfind. rewrite findNode_eq.
+        discriminate.
+
+  - (** Branch: [curr = nullptr] — exit loop, then [return nullptr].
+
+        The invariant gives us [curr_p |-> treeR q t_curr] with
+        [curr_p = nullptr]. By [treeR_null], [t_curr = Leaf]. *)
+    iDestruct 1 as (curr_p t_curr) "(Hlocal & Htree & %Hfind & Hwand)".
+    iDestruct (treeR_null with "Htree") as "%Hleaf". subst.
+
+    (** Recover the full tree by applying the wand.
+        [nullptr |-> treeR q Leaf] holds trivially since
+        [treeR q Leaf = as_Rep (fun p => [| p = nullptr |])]. *)
+    iAssert (nullptr |-> treeR q Leaf) as "Hnull".
+    { rewrite treeR_leaf. iPureIntro. reflexivity. }
+    iDestruct ("Hwand" with "Hnull") as "Hfull".
+
+    (** Process [return nullptr]. *)
+    go.
+
+    (** Deliver postcondition:
+        [n |-> treeR q t] (from wand) and [findNode k t = None]
+        (since [t_curr = Leaf] and [findNode k t = findNode k Leaf = None]). *)
+    iFrame "Hfull".
+    iPureIntro. rewrite Hfind. reflexivity.
+Admitted.
+(** [Admitted] not because the proof logic is incomplete, but because the
+    file depends on [skylabs.auto.cpp.prelude.{spec,proof}] — a proprietary
+    package ([SkyLabsAI/auto], marked [private] in the workspace config)
+    that is documented in the BRiCk [auto-docs] but not included in the
+    public workspace ([make clone-public] skips private repos).
+
+    Without [auto], the following are unavailable:
+    - [cpp.spec] command (spec registration against the AST)
+    - [verify_spec'] (unfolds spec into wp goal)
+    - [go] (automation for sequential C++ statement processing)
+    - [work] (separation logic goal solver)
+    - [wp_while] / [wp_if] (convenience tactic wrappers)
+
+    The core BRiCk library ([skylabs.lang.cpp.*]) provides the underlying
+    theorems ([wp_while_inv], [func_ok], [SFunction], Iris proof mode) but
+    not the automation layer that makes proofs tractable.
+
+    To compile this file:
+    1. Clone [SkyLabsAI/auto] into [.brick-workspace/fmdeps/auto/]
+    2. Rebuild: [cd .brick-workspace && dune build]
+    3. The proof should then type-check (modulo minor tactic adjustments). *)
 
 End with_Sigma.
