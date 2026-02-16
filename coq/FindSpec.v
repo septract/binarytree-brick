@@ -160,21 +160,7 @@ Proof using MOD.
     wp_auto.
     iIntros (curr_p).
     wp_auto.
-    iApply wp_operand_cast_l2r.
-    rewrite /wp_glval /=.
-    iApply wp_lval_var.
-    rewrite /read_decl /_local /=.
-    iDestruct (observe (reference_to _ _) with "Hpn") as "#Href".
-    iAssert (has_type (Vptr n) (Tptr (Tnamed _Node_name)))%I as "#Hht".
-    { iDestruct (observe (has_type_or_undef _ _) with "Hpn") as "#Hty".
-      iRevert "Hty". rewrite has_type_or_undef_unfold.
-      iIntros "[H | %Habs]"; [iExact "H" | discriminate]. }
-    iFrame "Href".
-    iExists (Vptr n).
-    iSplit.
-    { iExists (cQp.m 1).
-      rewrite _at_initializedR.
-      iFrame "Hpn Hht". }
+    wp_read_local "Hpn" (Vptr n).
     iIntros "Hcurr".
     wp_auto.
     (** Apply wp_while_inv with magic-wand loop invariant. *)
@@ -278,15 +264,8 @@ Proof using MOD.
            (** Inner [Sif]: test [k < curr->key]. *)
            iApply (wp_if source).
            iNext.
-           (** Unfold [treeR (Node ...)] to access fields.
-               Note: [treeR_node] fails because [treeR] is a Fixpoint and
-               Coq has already ι-reduced [treeR q (Node ...)]. We only
-               need [_at_as_Rep] to unfold the outer [_at]. *)
-           iRevert "Htree_cv". rewrite _at_as_Rep. iIntros "Htree_cv".
-           iDestruct "Htree_cv" as (lp2 rp2 rc2)
-             "(Htree_l & Htree_r & Hnode)".
-           iDestruct "Hnode" as
-             "(Hrc & Hcolor & Hkey & Hval & Hleft & Hright & Hstruct)".
+           (** Unfold [treeR (Node ...)] to access fields. *)
+           wp_unfold_node "Htree_cv".
            (** Evaluate [k < curr->key] via [wp_operand_binop]. *)
            iApply (wp_operand_binop source).
            rewrite /nd_seq.

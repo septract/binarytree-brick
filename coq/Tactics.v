@@ -8,6 +8,7 @@
 
     - [treeR_node_nonnull] — Extract [p <> nullptr] from [treeR (Node ...)].
     - [treeR_node_valid] — Extract [valid_ptr p] from [treeR (Node ...)].
+    - [treeR_node_fold] — Reconstruct [treeR (Node ...)] from fields.
 
     == Tactics ==
 
@@ -16,6 +17,7 @@
     - [wp_enter_block] — Enter a [Sseq] block after [interp] (4 lines → 1).
     - [wp_finish_anyR] — Convert [tptsto_fuzzyR] to [anyR].
     - [wp_destroy_local H] — Destroy a local variable of primitive type (~8 lines → 1).
+    - [wp_unfold_node H] — Destructure [treeR (Node ...)] into field hypotheses (3 lines → 1).
     - [wp_step] — One mechanical wp proof step (AST-driven dispatch).
     - [wp_auto] — Repeat [wp_step] until stuck (user provides only semantic steps).
 *)
@@ -201,7 +203,64 @@ Proof.
   - iRevert "Hv". rewrite _at_validR. auto.
 Qed.
 
+(** Fold field assertions back into [treeR (Node ...)].
+
+    This is the inverse of the unfold done by [_at_as_Rep] + [iDestruct].
+    After mutating fields in InsertSpec.v, use this to re-establish
+    the [treeR] invariant.
+
+    Usage:
+<<
+      iApply (treeR_node_fold with "[$Htl $Htr $Hrc $Hcolor $Hkey $Hval $Hleft $Hright $Hstruct]").
+>>
+*)
+Lemma treeR_node_fold q c l k v r (lp rp : ptr) (rc : Z) (p : ptr) :
+  lp |-> treeR q l **
+  rp |-> treeR q r **
+  p |-> (_ref_count |-> ulongR q rc **
+         _color     |-> boolR q (color_to_bool c) **
+         _key       |-> intR q k **
+         _value     |-> intR q v **
+         _left      |-> ptrR<_Node> q lp **
+         _right     |-> ptrR<_Node> q rp **
+         structR _Node_name q) |--
+  p |-> treeR q (Node c l k v r).
+Proof.
+  rewrite treeR_node _at_as_Rep.
+  iIntros "(Htl & Htr & Hnode)".
+  iExists lp, rp, rc. iFrame.
+Qed.
+
 End tree_lemmas.
+
+(** ** [wp_unfold_node H] — Destructure [treeR (Node ...)] into fields
+
+    [H] names the Iris hypothesis holding [p |-> treeR q (Node c l k v r)].
+
+    After the tactic, the context contains:
+    - [_ntl], [_ntr]: child subtree representations ([lp |-> treeR q l] etc.)
+    - [_nrc], [_ncolor], [_nkey], [_nval], [_nleft], [_nright]: field assertions
+    - [_nstruct]: struct identity assertion ([structR _Node_name q])
+    - Fresh Coq variables for the child pointers [lp], [rp] and ref count [rc].
+
+    This replaces the 3-line unfold pattern:
+<<
+      iRevert H. rewrite _at_as_Rep. iIntros H.
+      iDestruct H as (lp rp rc) "(Htl & Htr & Hnode)".
+      iDestruct "Hnode" as "(Hrc & Hcolor & Hkey & Hval & Hleft & Hright & Hstruct)".
+>>
+
+    After the tactic, rename hypotheses with [iRename] as needed.
+    To reconstruct the tree afterward, use [treeR_node_fold].
+*)
+Ltac wp_unfold_node H :=
+  iRevert H; rewrite _at_as_Rep; iIntros H;
+  let lp := fresh "_lp" in
+  let rp := fresh "_rp" in
+  let rc := fresh "_rc" in
+  iDestruct H as (lp rp rc) "(_ntl & _ntr & _nnode)";
+  iDestruct "_nnode" as
+    "(_nrc & _ncolor & _nkey & _nval & _nleft & _nright & _nstruct)".
 
 (** ** Meta-tactic: wp proof automation
 
