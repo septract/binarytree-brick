@@ -89,8 +89,8 @@ $(COQ_DIR)/RBTree.vo: $(COQ_DIR)/RBTree.v
 $(COQ_DIR)/TreeRep.vo: $(COQ_DIR)/TreeRep.v $(COQ_DIR)/RBTree.vo
 	$(COQC) $(COQFLAGS) $<
 
-# Custom wp automation tactics (no AST dependency — fast to compile).
-$(COQ_DIR)/Tactics.vo: $(COQ_DIR)/Tactics.v
+# Custom wp automation tactics + tree lemmas.
+$(COQ_DIR)/Tactics.vo: $(COQ_DIR)/Tactics.v $(COQ_DIR)/RBTree.vo $(COQ_DIR)/TreeRep.vo
 	$(COQC) $(COQFLAGS) $<
 
 # FindSpec extracts findNode from the generated AST's symbol table.

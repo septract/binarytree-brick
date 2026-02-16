@@ -273,17 +273,8 @@ Proof using MOD.
            rewrite ?interp_unfold /=.
            (** Strip modalities and provide resources for destruction. *)
            repeat iModIntro.
-           (** [destroy_val source (Tptr _Node) curr_p (▷ Q ret_p)].
-               Unfold to [wp_destroy_prim]: needs
-               [|={⊤}=> (∃ v, curr_p |-> tptstoR ... v) ** (▷ Q ret_p)]. *)
-           destroy_val_unfold.
-           rewrite wp_destroy_prim.unlock /=.
-           iModIntro.
-           iSplitL "Hcurr".
-           { (** Provide [curr_p |-> tptstoR] from [Hcurr]. *)
-             iRevert "Hcurr". rewrite _at_tptsto_fuzzyR.
-             iIntros "(%v' & %Hrel & Htpsto)".
-             iExists v'. rewrite _at_tptstoR. iExact "Htpsto". }
+           (** Destroy [curr_p] local variable (primitive pointer type). *)
+           wp_destroy_local "Hcurr".
            (** Now prove [▷ Q ret_p] using invariant resources. *)
            iNext.
            (** Reconstruct the tree via magic wand. *)
@@ -300,25 +291,9 @@ Proof using MOD.
            { wp_finish_anyR. }
            wp_finish_anyR.
         ++ (** Node: [cv <> nullptr], comparison yields true → body. *)
-           (** Extract [valid_ptr cv] from [treeR (Node ...)] via [structR].
-               Unfold treeR to expose the struct assertion, then observe. *)
-           iRevert "Htree_cv". rewrite treeR_node _at_as_Rep. iIntros "Htree_cv".
-           iDestruct "Htree_cv" as (lp_tc rp_tc rc_tc)
-             "(Htree_l & Htree_r & Hnode_cv)".
-           (** Decompose the [_at] over [∗] to isolate [structR], then
-               observe [validR] and [nonnullR] from it. *)
-           iDestruct "Hnode_cv" as "(Hrc_cv & Hcolor_cv & Hkey_cv & Hval_cv & Hleft_cv & Hright_cv & Hstruct_cv)".
-           iDestruct (observe (cv |-> validR) with "Hstruct_cv") as "#Hvalid_cv".
-           rewrite _at_validR.
-           iDestruct (observe (cv |-> nonnullR) with "Hstruct_cv") as "#Hnonnull_cv".
-           (** Re-fold [treeR] for later use. *)
-           iAssert (cv |-> treeR q (Node c_tc l_tc kn_tc vn_tc r_tc))%I
-             with "[Htree_l Htree_r Hrc_cv Hcolor_cv Hkey_cv Hval_cv Hleft_cv Hright_cv Hstruct_cv]" as "Htree_cv".
-           { rewrite treeR_node _at_as_Rep.
-             iExists lp_tc, rp_tc, rc_tc.
-             iFrame "Htree_l Htree_r Hrc_cv Hcolor_cv Hkey_cv Hval_cv Hleft_cv Hright_cv Hstruct_cv". }
-           (** Extract [cv ≠ nullptr] from nonnullR for the eval_binop proof. *)
-           iRevert "Hnonnull_cv". rewrite _at_nonnullR. iIntros "%Hcv_ne".
+           (** Extract [valid_ptr cv] and [cv ≠ nullptr] from [treeR (Node ...)]. *)
+           iDestruct (treeR_node_nonnull with "Htree_cv") as "[Htree_cv %Hcv_ne]".
+           iDestruct (treeR_node_valid with "Htree_cv") as "[Htree_cv #Hvalid_cv]".
            iExists (Vbool true). rewrite /Vbool /=.
            iSplit.
            { (** [eval_binop Bneq (Vptr cv) (Vptr nullptr) (Vbool true) ∗ True]
