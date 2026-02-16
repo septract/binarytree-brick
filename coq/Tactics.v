@@ -16,6 +16,8 @@
     - [wp_enter_block] — Enter a [Sseq] block after [interp] (4 lines → 1).
     - [wp_finish_anyR] — Convert [tptsto_fuzzyR] to [anyR].
     - [wp_destroy_local H] — Destroy a local variable of primitive type (~8 lines → 1).
+    - [wp_step] — One mechanical wp proof step (AST-driven dispatch).
+    - [wp_auto] — Repeat [wp_step] until stuck (user provides only semantic steps).
 *)
 
 From Coq Require Import ZArith.
@@ -200,3 +202,69 @@ Proof.
 Qed.
 
 End tree_lemmas.
+
+(** ** Meta-tactic: wp proof automation
+
+    [wp_step] performs one mechanical wp proof step by trying rules in
+    priority order. [wp_auto] repeats it until stuck.
+
+    Design principle: [wp_auto] handles ALL mechanical/syntactic steps
+    (modality stripping, AST-driven wp rules, definitional unfolding).
+    The user provides ONLY semantic steps (loop invariants, case splits,
+    eval_binop proofs, resource framing, hypothesis destructuring).
+
+    Intended proof style:
+<<
+      wp_auto.                          (* mechanical: reach the while *)
+      iApply (wp_while_inv source I).   (* semantic: provide invariant *)
+      { wp_auto.                        (* mechanical: enter loop body *)
+        destruct tc.                    (* semantic: case split *)
+        - wp_auto. ...                  (* each branch *)
+      }
+>>
+
+    == Priority order ==
+
+    1. Statement wp rules (deterministic: match AST constructor)
+    2. Block/decl/init unfolding
+    3. Expression wp rules (null literal)
+    4. Interp unfolding (temporary destruction)
+    5. Continuation unfolding (Kloop, Kfree, etc.)
+    6. Modality stripping (fallback: |={⊤}=>, ▷)
+
+    Modalities are last because they appear between every other step —
+    if tried first, they'd mask the actual wp rule that should fire.
+    But wp rules only apply when modalities have been stripped. The
+    [repeat] loop handles this: first pass strips modalities, second
+    pass finds the wp rule.
+*)
+
+Ltac wp_step :=
+  first [
+    (* 1. Statement-level wp rules *)
+    iApply wp_seq |
+    iApply wp_break |
+    iApply wp_return |
+    (* 2. Block / declaration / initialization unfolding *)
+    progress (rewrite wp_block_eq /wp_block_def) |
+    progress (rewrite wp_decls_eq /wp_decls_def /=) |
+    progress (rewrite /wp_initialize /qual_norm /=) |
+    progress (rewrite wp_initialize_unqualified.unlock /=) |
+    (* 3. Expression-level rules *)
+    wp_null_val |
+    (* 4. Interp (temporary destruction) unfolding *)
+    progress (rewrite interp_unfold /=) |
+    (* 5. Continuation structure unfolding *)
+    progress (rewrite /while_unroll) |
+    progress (rewrite /Kloop /Kloop_inner /=) |
+    progress (rewrite /Kfree /Kat_exit /Kcleanup /Kreturn /Kreturn_inner /=) |
+    progress (rewrite /get_return_type /=) |
+    (* 6. Modality stripping (fallback) *)
+    progress iModIntro |
+    progress iNext
+  ].
+
+(** [wp_auto] repeats [wp_step] until the goal requires user input.
+    Terminates because each step makes progress (changes the goal)
+    and the AST is finite. *)
+Ltac wp_auto := repeat wp_step.

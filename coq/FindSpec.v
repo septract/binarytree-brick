@@ -156,15 +156,10 @@ Proof using MOD.
     subst vals. simpl.
     iDestruct "Hspec" as (k n q t) "(%Hargs & Htree & Hcont)".
     injection Hargs as Hv Hv0. subst v v0.
-    (** Strip later, enter Sseq. *)
-    iNext.
-    iApply wp_seq.
-    rewrite wp_block_eq /wp_block_def.
-    rewrite wp_decls_eq /wp_decls_def /=.
-    iModIntro. iNext.
+    (** Strip later, enter Sseq, unfold block + decl. *)
+    wp_auto.
     iIntros (curr_p).
-    rewrite /qual_norm /=.
-    rewrite wp_initialize_unqualified.unlock /=.
+    wp_auto.
     iApply wp_operand_cast_l2r.
     rewrite /wp_glval /=.
     iApply wp_lval_var.
@@ -181,9 +176,7 @@ Proof using MOD.
       rewrite _at_initializedR.
       iFrame "Hpn Hht". }
     iIntros "Hcurr".
-    rewrite interp_unfold /=.
-    iModIntro. iModIntro.
-    iModIntro. iNext. do 4 iModIntro.
+    wp_auto.
     (** Apply wp_while_inv with magic-wand loop invariant. *)
     iApply (wp_while_inv source (
       Exists (cv : ptr) (tc : tree Z Z),
@@ -236,43 +229,15 @@ Proof using MOD.
                with "Heq") as "[Himpure Htrue]".
              rewrite /eval_binop.
              iFrame "Htrue". iRight. iExact "Himpure". }
-           (** [Sbreak] → loop exit → return nullptr.
-               Leaf means [findNode k tc = None], so [findNode k t = None]
-               by Hcorr. *)
-           (** Process false branch → [Sbreak] exits while loop. *)
-           rewrite ?interp_unfold /=.
-           iApply wp_break.
-           (** Strip modalities after break (just one |={⊤}=>). *)
-           iModIntro.
-           (** Now at [Q_outer Normal]: strip [|={⊤}=> ▷ Kloop ...]. *)
-           iModIntro. iNext.
-           (** [Kloop_inner (|> I) Q Normal = I] — loop restarts? No,
-               after Break we should be at [Q Normal]. The [Kloop] here
-               is from [wp_while_inv]'s recursion structure.
-               Try unfolding Kloop to reduce. *)
-           rewrite /Kloop /Kloop_inner /=.
-           (** Process [return curr;] (= return nullptr for Leaf case). *)
-           iApply wp_return.
-           iModIntro. iNext. iModIntro.
+           (** Break from loop, process [return curr;] (= return nullptr). *)
+           wp_auto.
            iIntros (ret_p).
-           rewrite /get_return_type /=.
-           rewrite /wp_initialize /qual_norm wp_initialize_unqualified.unlock /=.
-           (** Return expression is [Ecast Cnull2ptr Enull] = nullptr. *)
-           wp_null_val.
+           (** Return expression: [Ecast Cnull2ptr Enull] = nullptr. *)
+           wp_auto.
            (** Wand: [ret_p |-> tptsto_fuzzyR ... (Vptr nullptr) -* ...]. *)
            iIntros "Hret_store".
-           (** Process [interp source FreeTemps.id (▷ ...)]. *)
-           rewrite ?interp_unfold /=.
-           (** Strip modalities. *)
-           iModIntro. iNext. iModIntro. iModIntro.
-           (** Unfold Kfree/Kcleanup/Kreturn: reduces to
-               [interp source frees (wp_make_mutables source [] (▷ Q ret_p))]. *)
-           rewrite /Kfree /Kat_exit /Kcleanup /Kreturn /Kreturn_inner /=.
-           (** Process [interp source (1 >*> FreeTemps.delete ... curr_p) ...]:
-               first interp id, then destroy curr_p. *)
-           rewrite ?interp_unfold /=.
-           (** Strip modalities and provide resources for destruction. *)
-           repeat iModIntro.
+           (** Process interp, Kfree/Kreturn, reach destruction. *)
+           wp_auto.
            (** Destroy [curr_p] local variable (primitive pointer type). *)
            wp_destroy_local "Hcurr".
            (** Now prove [▷ Q ret_p] using invariant resources. *)
@@ -309,7 +274,7 @@ Proof using MOD.
              rewrite /eval_binop.
              iFrame "Htrue". iRight. iExact "Himpure". }
            (** Strip [interp] + enter [Sseq [Sif ...]]. *)
-           wp_enter_block.
+           wp_auto.
            (** Inner [Sif]: test [k < curr->key]. *)
            iApply (wp_if source).
            iNext.
