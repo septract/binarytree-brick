@@ -231,6 +231,46 @@ Proof.
   iExists lp, rp, rc. iFrame.
 Qed.
 
+(** Observe [reference_to (Tnamed cls) p] from [p |-> structR cls q].
+
+    Chain: structR → type_ptrR (observe) → svalidR (observe) →
+    strict_valid_ptr (_at_svalidR) → reference_to_intro + has_type_ptr'
+    (valid_ptr via strict_valid_valid, aligned_ptr_ty via
+    type_ptr_aligned_pure).
+
+    Registered as [Observe] so [observe] can extract [reference_to]
+    persistently without consuming the [structR] hypothesis.
+
+    Usage:
+<<
+      iDestruct (observe (reference_to _ _) with "_nstruct") as "#_ref_cv".
+>>
+*)
+Local Lemma structR_reference_to_entails cls q (p : ptr) :
+  p |-> structR cls q |-- reference_to (Tnamed cls) p.
+Proof.
+  iIntros "H".
+  iDestruct (observe (p |-> type_ptrR (Tnamed cls)) with "H") as "#Htype".
+  iDestruct (observe (p |-> svalidR) with "Htype") as "#Hsvalid".
+  iClear "H".
+  iRevert "Hsvalid". rewrite _at_svalidR. iIntros "#Hsvalid".
+  iPoseProof (reference_to_intro with "Hsvalid") as "Hwand".
+  iApply "Hwand".
+  rewrite has_type_ptr'.
+  iPoseProof (strict_valid_valid with "Hsvalid") as "#Hvalid".
+  iFrame "Hvalid".
+  iRevert "Htype". rewrite _at_type_ptrR. iIntros "#Htype".
+  by iPoseProof (type_ptr_aligned_pure with "Htype") as "$".
+Qed.
+
+#[global] Instance structR_reference_to cls q (p : ptr) :
+  Observe (reference_to (Tnamed cls) p) (p |-> structR cls q).
+Proof.
+  rewrite /Observe.
+  etransitivity; [exact (structR_reference_to_entails cls q p) |].
+  iIntros "#H". iModIntro. iExact "H".
+Qed.
+
 End tree_lemmas.
 
 (** ** [wp_unfold_node H] — Destructure [treeR (Node ...)] into fields
