@@ -18,6 +18,8 @@
     - [wp_finish_anyR] — Convert [tptsto_fuzzyR] to [anyR].
     - [wp_destroy_local H] — Destroy a local variable of primitive type (~8 lines → 1).
     - [wp_unfold_node H] — Destructure [treeR (Node ...)] into field hypotheses (3 lines → 1).
+    - [wp_offset H] — Convert [p |-> (f |-> R)] to [(p ,, f) |-> R] (~3 lines → 1).
+    - [wp_provide_value H v] — Provide [initializedR] evidence from [primR] (~8 lines → 1).
     - [wp_step] — One mechanical wp proof step (AST-driven dispatch).
     - [wp_auto] — Repeat [wp_step] until stuck (user provides only semantic steps).
 *)
@@ -271,6 +273,22 @@ Proof.
   iIntros "#H". iModIntro. iExact "H".
 Qed.
 
+(** One-directional entailment for [_at_offsetR], used by [wp_offset].
+    [_at_offsetR] is a bi-entailment ([equiv]) which can't be rewritten
+    in contravariant position. This lemma provides the forward direction
+    as a plain entailment, which [iPoseProof] can apply to a hypothesis. *)
+Lemma at_offsetR_intro (p : ptr) (o : offset) (r : Rep) :
+  p |-> _offsetR o r |-- (p ,, o) |-> r.
+Proof. by rewrite _at_offsetR. Qed.
+
+(** One-directional entailment for [_at_primR], used by [wp_provide_value].
+    Decomposes [primR] into its pure, persistent, and spatial components
+    as a plain entailment. *)
+Lemma at_primR_intro (p : ptr) ty q v :
+  p |-> primR ty q v |--
+    [| ~~ is_raw v |] ** has_type v ty ** p |-> tptsto_fuzzyR ty q v.
+Proof. by rewrite _at_primR. Qed.
+
 End tree_lemmas.
 
 (** ** [wp_unfold_node H] — Destructure [treeR (Node ...)] into fields
@@ -302,6 +320,58 @@ Ltac wp_unfold_node H :=
   iDestruct "_nnode" as
     "(_nrc & _ncolor & _nkey & _nval & _nleft & _nright & _nstruct)".
 
+(** ** [wp_offset H] — Convert [p |-> (f |-> R)] to [(p ,, f) |-> R]
+
+    [H] names the Iris hypothesis holding [p |-> (_field |-> R)].
+    After the tactic, [H] holds [(p ,, _field) |-> R].
+
+    Uses [at_offsetR_intro] (forward direction of [_at_offsetR]) via
+    [iDestruct] to transform the hypothesis in place.
+
+    Replaces:
+<<
+      iAssert ((p ,, _field) |-> R)%I with "[H]" as "H".
+      { by rewrite -_at_offsetR. }
+>>
+*)
+Ltac wp_offset H :=
+  iDestruct (at_offsetR_intro with H) as H.
+
+(** ** [wp_provide_value H v] — Provide [initializedR] evidence from [primR]
+
+    [H] names the Iris hypothesis holding [(p ,, f) |-> primR ty q v]
+    (e.g. [intR q kn_tc]). [v] is the value (e.g. [Vint kn_tc]).
+
+    Uses [at_primR_intro] (forward direction of [_at_primR]) via
+    [iDestruct] to decompose the [primR] into pure, persistent, and
+    spatial parts that satisfy the [initializedR] goal.
+
+    Replaces the ~8 line pattern:
+<<
+      iExists v.
+      iSplit.
+      { iExists q.
+        rewrite _at_initializedR.
+        iAssert ([| ~~ is_raw v |] ** has_type v ty **
+                 (p ,, f) |-> tptsto_fuzzyR ty q v)%I
+          with "[H]" as "(%_Hraw & #_Htype & _Htptsto)".
+        { by rewrite -_at_primR. }
+        iFrame "_Htptsto".
+        iExact "_Htype". }
+>>
+
+    After the tactic, [H] is consumed and the goal is the continuation
+    after the value read.
+*)
+Ltac wp_provide_value H v :=
+  iExists v;
+  iSplit;
+  [ iExists _;
+    rewrite _at_initializedR;
+    iDestruct (at_primR_intro with H) as "(%_pv_raw & #_pv_type & _pv_tptsto)";
+    iFrame "_pv_tptsto"; iExact "_pv_type"
+  | ].
+
 (** ** Meta-tactic: wp proof automation
 
     [wp_step] performs one mechanical wp proof step by trying rules in
@@ -330,6 +400,10 @@ Ltac wp_unfold_node H :=
     4. Interp unfolding (temporary destruction)
     5. Continuation unfolding (Kloop, Kfree, etc.)
     6. Modality stripping (fallback: |={⊤}=>, ▷)
+
+    Note: l2r cast, member access, read_arrow/read_decl are NOT included
+    because they are part of larger sequences (wp_read_local, field access)
+    and would interfere if auto-fired.
 
     Modalities are last because they appear between every other step —
     if tried first, they'd mask the actual wp rule that should fire.

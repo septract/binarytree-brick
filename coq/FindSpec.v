@@ -272,49 +272,26 @@ Proof using MOD.
            iSplit.
            { (** Left ordering: eval [k], then [curr->key]. *)
              wp_read_local "Hpk" (Vint k).
-             (** Eval [curr->key]: l2r cast of arrow member access. *)
+             (** Eval [curr->key]: l2r cast → member access → read_arrow. *)
              iApply wp_operand_cast_l2r.
              rewrite /wp_glval /=.
              iApply wp_lval_member; [reflexivity |].
              rewrite /read_arrow /=.
              (** Inside read_arrow: evaluate [curr] pointer. *)
              wp_read_local "Hcurr" (Vptr cv).
-             (** Goal: [reference_to ... cv ** read_decl (cv ,, _key) Tint Q'].
-                 Observe [reference_to] persistently from [_nstruct],
-                 keeping [_nstruct] for later field accesses. *)
+             (** Observe [reference_to] for the struct, unfold read_decl. *)
              iDestruct (observe (reference_to _ _) with "_nstruct") as "#_ref_cv".
              iSplitR.
              { iExact "_ref_cv". }
-             (** Now: [read_decl (cv ,, _key) Tint Q'].
-                 Unfold for non-reference type [Tint]:
-                 [reference_to Tint (cv ,, _key) ** Q' (cv ,, _key)]. *)
              rewrite /read_decl /=.
-             (** Transform [_nkey] to offset form: convert
-                 [cv |-> (_key |-> intR ...)] to [(cv ,, _key) |-> intR ...].
-                 Needed for [Observe] instance on [primR] to fire. *)
-             iAssert ((cv ,, _key) |-> intR q kn_tc)%I with "[_nkey]" as "_nkey".
-             { by rewrite -_at_offsetR. }
-             (** Observe [reference_to Tint (cv ,, _key)] persistently
-                 from [_nkey], keeping [_nkey] for the value read. *)
+             (** Convert [_nkey] to offset form for [Observe] to fire. *)
+             wp_offset "_nkey".
+             (** Observe [reference_to Tint (cv ,, _key)] from [_nkey]. *)
              iDestruct (observe (reference_to _ _) with "_nkey") as "#_ref_key".
              iSplitR.
              { iExact "_ref_key". }
-             (** Value read continuation at [cv ,, _key]:
-                 provide the stored value and [initializedR] evidence. *)
-             iExists (Vint kn_tc).
-             iSplit.
-             { iExists q.
-               rewrite _at_initializedR.
-               (** Decompose [_nkey : primR] into [~~is_raw], [has_type],
-                   and [tptsto_fuzzyR] via [_at_primR]. *)
-               iAssert ([| ~~ is_raw (Vint kn_tc) |] ** has_type (Vint kn_tc) Tint **
-                        (cv ,, _key) |-> tptsto_fuzzyR Tint q (Vint kn_tc))%I
-                 with "[_nkey]" as "(%_Hraw & #_Htype & _Htptsto)".
-               { by rewrite -_at_primR. }
-               iFrame "_Htptsto".
-               (** Remaining: [has_type (Vint kn_tc) Tint].
-                   ([has_type_or_undef] simplified since [Vint] isn't undef.) *)
-               iExact "_Htype". }
+             (** Provide stored value and [initializedR] evidence. *)
+             wp_provide_value "_nkey" (Vint kn_tc).
              (** Provide binop result: [k < kn_tc] is pure integer comparison. *)
              iExists (Vbool (bool_decide (k < kn_tc)%Z)).
              iSplit.
