@@ -304,7 +304,67 @@ Proof using MOD.
              destruct (bool_decide (k < kn_tc)%Z) eqn:Hlt.
              - (** [k < kn_tc]: enter then branch (curr = curr->left). *)
                wp_auto.
-               admit.
+               (** Goal: [wp_lval (Eassign (Evar "curr") (Ecast Cl2r
+                   (Emember ... "left" ...)) ...) ...].
+                   Apply assignment rule (eval2 rl: RHS first, then LHS). *)
+               iApply wp_lval_assign.
+               rewrite /=.
+               (** RHS: evaluate [curr->left] as operand.
+                   Same field-access pattern as [curr->key] above. *)
+               iApply wp_operand_cast_l2r.
+               rewrite /wp_glval /=.
+               iApply wp_lval_member; [reflexivity |].
+               rewrite /read_arrow /=.
+               wp_read_local "Hcurr" (Vptr cv).
+               iDestruct (observe (reference_to _ _) with "_nstruct") as "#_ref_cv2".
+               iSplitR.
+               { iExact "_ref_cv2". }
+               rewrite /read_decl /=.
+               wp_offset "_nleft".
+               iDestruct (observe (reference_to _ _) with "_nleft") as "#_ref_left".
+               iSplitR.
+               { iExact "_ref_left". }
+               wp_provide_value "_nleft" (Vptr _lp).
+               (** LHS: evaluate [curr] as lvalue → address [curr_p]. *)
+               iApply wp_lval_var.
+               rewrite /read_decl /_local /=.
+               iDestruct (observe (reference_to _ _) with "Hcurr") as "#_ref_curr2".
+               iFrame "_ref_curr2". iClear "_ref_curr2".
+               (** Assignment: provide writeable [anyR], receive [tptstoR]. *)
+               iSplitL "Hcurr".
+               { wp_finish_anyR. }
+               iIntros "Hcurr_new".
+               (** Handle [interp] for temporary cleanup, return to loop. *)
+               wp_auto.
+               (** Re-establish loop invariant with [cv' = _lp], [tc' = l_tc]. *)
+               iExists _lp, l_tc.
+               (** Convert [tptstoR] to [tptsto_fuzzyR] for the invariant. *)
+               iDestruct (tptstoR_to_fuzzyR with "Hcurr_new") as "Hcurr_new".
+               iFrame "Hcurr_new Hpk Hpn _ntl".
+               (** Remaining: [| findNode ... |] ∗ wand ∗ cont.
+                   Split pure part first (no hyps needed). *)
+               iSplitR.
+               { (** [findNode k t = findNode k l_tc]: [Hcorr] + [findNode_lt]. *)
+                 iPureIntro. rewrite Hcorr.
+                 apply findNode_lt. apply bool_decide_eq_true_1 in Hlt.
+                 exact Hlt. }
+               (** Remaining: wand ∗ cont.
+                   Separate wand construction from continuation. *)
+               iSplitL "Hwand _ntr _nrc _ncolor _nkey _nval _nleft _nright _nstruct".
+               { (** Magic wand: [_lp |-> treeR q l_tc -* n |-> treeR q t].
+                     Receive left subtree back, fold the node,
+                     apply [Hwand] to get the original tree. *)
+                 iIntros "Htl_back".
+                 iApply "Hwand".
+                 (** Goal is already [Exists lp rp rc, ...] (Fixpoint computed).
+                     Convert offset'd hypotheses back, provide existentials,
+                     and frame. *)
+                 iRevert "_nkey". rewrite -_at_offsetR. iIntros "_nkey".
+                 iRevert "_nleft". rewrite -_at_offsetR. iIntros "_nleft".
+                 iExists _lp, _rp, _rc.
+                 iFrame "Htl_back _ntr".
+                 iFrame "_nrc _ncolor _nkey _nval _nleft _nright _nstruct". }
+               iExact "Hcont".
              - (** [k >= kn_tc]: enter else branch (test curr->key < k). *)
                wp_auto.
                admit. }

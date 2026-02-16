@@ -289,6 +289,21 @@ Lemma at_primR_intro (p : ptr) ty q v :
     [| ~~ is_raw v |] ** has_type v ty ** p |-> tptsto_fuzzyR ty q v.
 Proof. by rewrite _at_primR. Qed.
 
+(** Convert [tptstoR] to [tptsto_fuzzyR] at a given pointer.
+
+    After an assignment, [wp_lval_assign] yields [p |-> tptstoR ...].
+    The loop invariant uses [p |-> tptsto_fuzzyR ...] (the weaker form).
+    This lemma bridges the gap.
+
+    Usage:
+<<
+      iDestruct (tptstoR_to_fuzzyR with "H") as "H".
+>>
+*)
+Lemma tptstoR_to_fuzzyR (p : ptr) ty q v :
+  p |-> tptstoR ty q v |-- p |-> tptsto_fuzzyR ty q v.
+Proof. by rewrite tptsto_fuzzyR_intro. Qed.
+
 End tree_lemmas.
 
 (** ** [wp_unfold_node H] — Destructure [treeR (Node ...)] into fields
@@ -418,12 +433,14 @@ Ltac wp_step :=
     iApply wp_seq |
     iApply wp_break |
     iApply wp_return |
+    iApply wp_expr |
     (* 2. Block / declaration / initialization unfolding *)
     progress (rewrite wp_block_eq /wp_block_def) |
     progress (rewrite wp_decls_eq /wp_decls_def /=) |
     progress (rewrite /wp_initialize /qual_norm /=) |
     progress (rewrite wp_initialize_unqualified.unlock /=) |
     (* 3. Expression-level rules *)
+    progress (rewrite /wp_discard /=) |
     wp_null_val |
     (* 4. Interp (temporary destruction) unfolding *)
     progress (rewrite interp_unfold /=) |
