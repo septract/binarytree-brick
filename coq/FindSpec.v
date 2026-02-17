@@ -137,6 +137,283 @@ Definition findNode_spec : function_spec :=
             | Some _ => ret <> nullptr
             end |])).
 
+(** ** Shared continuations for [nd_seq] orderings
+
+    Each [wp_operand_binop] produces [nd_seq] = [∧], requiring both
+    left and right operand orderings. After evaluation, the goal is
+    identical — these tactics capture the shared continuation so
+    each ordering just evaluates its operands and calls the tactic.
+
+    Coq-term variables (cv, kn_tc, etc.) must be explicit parameters
+    since they exist only in the proof context, not at definition time.
+    Iris hypothesis names (strings like "Hcurr") are resolved at call
+    time and don't need parameterization. *)
+
+(** Read [curr->key] via field access chain. *)
+Ltac findNode_read_curr_key cv kn_tc :=
+  iApply wp_operand_cast_l2r;
+  rewrite /wp_glval /=;
+  iApply wp_lval_member; [reflexivity |];
+  rewrite /read_arrow /=;
+  wp_read_local "Hcurr" (Vptr cv);
+  iDestruct (observe (reference_to _ _) with "_nstruct") as "#_obs";
+  iSplitR; [iExact "_obs" |]; iClear "_obs";
+  rewrite /read_decl /=;
+  wp_offset "_nkey";
+  (* Extract has_type_prop for kn_tc as a pure Coq hypothesis.
+     After wp_offset, _nkey is [p |-> primR Tint q (Vint kn_tc)].
+     The instance [primR_observe_has_type_prop] + [_at_observe_only_provable]
+     gives [Observe [| has_type_prop (Vint kn_tc) Tint |] (p |-> primR ...)].
+     Idempotent: skip if already present (this tactic is called twice
+     in the same proof branch — once for the outer comparison and once
+     for the inner comparison). *)
+  match goal with
+  | _ : has_type_prop (Vint kn_tc) Tint |- _ => idtac
+  | _ =>
+    iDestruct (observe ([| has_type_prop (Vint kn_tc) Tint |]) with "_nkey")
+      as "%_htp_kn"
+  end;
+  iDestruct (observe (reference_to _ _) with "_nkey") as "#_obs";
+  iSplitR; [iExact "_obs" |]; iClear "_obs";
+  wp_provide_value "_nkey" (Vint kn_tc).
+
+(** Innermost continuation: after evaluating both operands of [curr->key < k].
+    Case-splits on [kn_tc < k]: go-right or break (key found). *)
+Ltac findNode_after_inner2_eval kn_tc k cv n q t _lp _rp _rc r_tc :=
+  iExists (Vbool (bool_decide (kn_tc < k)%Z));
+  iSplit;
+  [ iSplitR; [| done];
+    rewrite /eval_binop;
+    iLeft;
+    (* _htp_kn : has_type_prop (Vint kn_tc) Tint — already pure from findNode_read_curr_key *)
+    (* Extract has_type_prop for k from has_type_or_undef *)
+    iRevert "_hty_k";
+    rewrite has_type_or_undef_unfold;
+    iIntros "[_htmp_k | %_habs]"; [| discriminate];
+    iDestruct (has_type_has_type_prop with "_htmp_k") as "%_htp_k";
+    iPureIntro;
+    eapply eval_lt; [solve [typeclasses eauto] | done | assumption | assumption]
+  | rewrite /Vbool /=;
+    destruct (bool_decide (kn_tc < k)%Z) eqn:Hgt;
+    [ (* kn_tc < k: go right *)
+      wp_auto;
+      iApply wp_lval_assign;
+      rewrite /=;
+      iApply wp_operand_cast_l2r;
+      rewrite /wp_glval /=;
+      iApply wp_lval_member; [reflexivity |];
+      rewrite /read_arrow /=;
+      wp_read_local "Hcurr" (Vptr cv);
+      iDestruct (observe (reference_to _ _) with "_nstruct") as "#_obs";
+      iSplitR; [iExact "_obs" |]; iClear "_obs";
+      rewrite /read_decl /=;
+      wp_offset "_nright";
+      iDestruct (observe (reference_to _ _) with "_nright") as "#_obs";
+      iSplitR; [iExact "_obs" |]; iClear "_obs";
+      wp_provide_value "_nright" (Vptr _rp);
+      iApply wp_lval_var;
+      rewrite /read_decl /_local /=;
+      iDestruct (observe (reference_to _ _) with "Hcurr") as "#_obs";
+      iFrame "_obs"; iClear "_obs";
+      iSplitL "Hcurr"; [wp_finish_anyR |];
+      iIntros "Hcurr_new";
+      wp_auto;
+      iExists _rp, r_tc;
+      iDestruct (tptstoR_to_fuzzyR with "Hcurr_new") as "Hcurr_new";
+      iFrame "Hcurr_new Hpk Hpn _ntr";
+      iSplitR;
+      [ iPureIntro;
+        match goal with Hc : findNode _ _ = findNode _ _ |- _ => rewrite Hc end;
+        apply findNode_gt;
+        match goal with Hg : bool_decide (kn_tc < k)%Z = true |- _ =>
+          apply bool_decide_eq_true_1 in Hg; exact Hg end
+      | iSplitL "Hwand _ntl _nrc _ncolor _nkey _nval _nleft _nright _nstruct";
+        [ iIntros "Htr_back";
+          iApply "Hwand";
+          iRevert "_nkey"; rewrite -_at_offsetR; iIntros "_nkey";
+          iRevert "_nright"; rewrite -_at_offsetR; iIntros "_nright";
+          iExists _lp, _rp, _rc;
+          iFrame "_ntl Htr_back";
+          iFrame "_nrc _ncolor _nkey _nval _nleft _nright _nstruct"
+        | iExact "Hcont" ] ]
+    | (* k = kn_tc: break *)
+      wp_auto;
+      let ret_p := fresh "ret_p" in
+      iIntros (ret_p);
+      wp_read_local "Hcurr" (Vptr cv);
+      iIntros "Hret_store";
+      wp_auto;
+      wp_destroy_local "Hcurr";
+      iNext;
+      iRevert "_nkey"; rewrite -_at_offsetR; iIntros "_nkey";
+      iAssert (n |-> treeR q t)%I
+        with "[Hwand _ntl _ntr _nrc _ncolor _nkey _nval _nleft _nright _nstruct]"
+        as "Htree";
+      [ iApply "Hwand";
+        iExists _lp, _rp, _rc;
+        iFrame "_ntl _ntr _nrc _ncolor _nkey _nval _nleft _nright _nstruct"
+      | iApply ("Hcont" $! cv with "[Htree]");
+        [ iFrame "Htree"; iPureIntro;
+          match goal with Hc : findNode _ _ = findNode _ _ |- _ => rewrite Hc end;
+          simpl;
+          match goal with Hl : bool_decide (k < kn_tc)%Z = false |- _ =>
+            apply bool_decide_eq_false_1 in Hl end;
+          match goal with Hg : bool_decide (kn_tc < k)%Z = false |- _ =>
+            apply bool_decide_eq_false_1 in Hg end;
+          destruct (k <? kn_tc)%Z eqn:E1;
+          [ apply Z.ltb_lt in E1; lia
+          | destruct (kn_tc <? k)%Z eqn:E2;
+            [ apply Z.ltb_lt in E2; lia
+            | assumption ] ]
+        | iFrame "Hret_store";
+          iSplitL "Hpk"; [wp_finish_anyR | wp_finish_anyR] ] ] ] ].
+
+(** Inner continuation: after evaluating both operands of [k < curr->key].
+    Case-splits on [k < kn_tc]: go-left or else-branch (inner comparison). *)
+Ltac findNode_after_inner1_eval kn_tc k cv n q t _lp _rp _rc l_tc r_tc :=
+  iExists (Vbool (bool_decide (k < kn_tc)%Z));
+  iSplit;
+  [ iSplitR; [| done];
+    rewrite /eval_binop;
+    iLeft;
+    (* _htp_kn : has_type_prop (Vint kn_tc) Tint — already pure from findNode_read_curr_key *)
+    (* Extract has_type_prop for k from has_type_or_undef *)
+    iRevert "_hty_k";
+    rewrite has_type_or_undef_unfold;
+    iIntros "[_htmp_k | %_habs]"; [| discriminate];
+    iDestruct (has_type_has_type_prop with "_htmp_k") as "%_htp_k";
+    iPureIntro;
+    eapply eval_lt; [solve [typeclasses eauto] | done | assumption | assumption]
+  | rewrite /Vbool /=;
+    destruct (bool_decide (k < kn_tc)%Z) eqn:Hlt;
+    [ (* k < kn_tc: go left *)
+      wp_auto;
+      iApply wp_lval_assign;
+      rewrite /=;
+      iApply wp_operand_cast_l2r;
+      rewrite /wp_glval /=;
+      iApply wp_lval_member; [reflexivity |];
+      rewrite /read_arrow /=;
+      wp_read_local "Hcurr" (Vptr cv);
+      iDestruct (observe (reference_to _ _) with "_nstruct") as "#_obs";
+      iSplitR; [iExact "_obs" |]; iClear "_obs";
+      rewrite /read_decl /=;
+      wp_offset "_nleft";
+      iDestruct (observe (reference_to _ _) with "_nleft") as "#_obs";
+      iSplitR; [iExact "_obs" |]; iClear "_obs";
+      wp_provide_value "_nleft" (Vptr _lp);
+      iApply wp_lval_var;
+      rewrite /read_decl /_local /=;
+      iDestruct (observe (reference_to _ _) with "Hcurr") as "#_obs";
+      iFrame "_obs"; iClear "_obs";
+      iSplitL "Hcurr"; [wp_finish_anyR |];
+      iIntros "Hcurr_new";
+      wp_auto;
+      iExists _lp, l_tc;
+      iDestruct (tptstoR_to_fuzzyR with "Hcurr_new") as "Hcurr_new";
+      iFrame "Hcurr_new Hpk Hpn _ntl";
+      iSplitR;
+      [ iPureIntro;
+        match goal with Hc : findNode _ _ = findNode _ _ |- _ => rewrite Hc end;
+        apply findNode_lt;
+        match goal with Hl : bool_decide (k < kn_tc)%Z = true |- _ =>
+          apply bool_decide_eq_true_1 in Hl; exact Hl end
+      | iSplitL "Hwand _ntr _nrc _ncolor _nkey _nval _nleft _nright _nstruct";
+        [ iIntros "Htl_back";
+          iApply "Hwand";
+          iRevert "_nkey"; rewrite -_at_offsetR; iIntros "_nkey";
+          iRevert "_nleft"; rewrite -_at_offsetR; iIntros "_nleft";
+          iExists _lp, _rp, _rc;
+          iFrame "Htl_back _ntr";
+          iFrame "_nrc _ncolor _nkey _nval _nleft _nright _nstruct"
+        | iExact "Hcont" ] ]
+    | (* k >= kn_tc: inner comparison [curr->key < k] *)
+      wp_auto;
+      iApply (wp_if source); iNext;
+      iRevert "_nkey"; rewrite -_at_offsetR; iIntros "_nkey";
+      iApply (wp_operand_binop source);
+      rewrite /nd_seq;
+      iSplit;
+      [ findNode_read_curr_key cv kn_tc;
+        wp_read_local "Hpk" (Vint k);
+        findNode_after_inner2_eval kn_tc k cv n q t _lp _rp _rc r_tc
+      | wp_read_local "Hpk" (Vint k);
+        findNode_read_curr_key cv kn_tc;
+        findNode_after_inner2_eval kn_tc k cv n q t _lp _rp _rc r_tc ] ] ].
+
+(** Outer continuation: after evaluating both operands of [curr != nullptr].
+    Case-splits on [tc]: Leaf (exit loop) or Node (enter body). *)
+Ltac findNode_after_outer_eval cv tc k n q t :=
+  destruct tc as [| c_tc l_tc kn_tc vn_tc r_tc];
+  [ (* Leaf: cv = nullptr, loop exits *)
+    iDestruct (treeR_leaf_implies_null with "Htree_cv") as "%Hnull";
+    subst;
+    iExists (Vbool false); rewrite /Vbool /=;
+    iSplit;
+    [ iPoseProof valid_ptr_nullptr as "Hvn";
+      iPoseProof (eval_ptr_self_eq source _Node nullptr with "Hvn") as "Heq";
+      iPoseProof (eval_ptr_neq source _Node nullptr nullptr true with "Heq")
+        as "[Himpure Htrue]";
+      rewrite /eval_binop;
+      iFrame "Htrue"; iRight; iExact "Himpure"
+    | wp_auto;
+      let ret_p := fresh "ret_p" in
+      iIntros (ret_p);
+      wp_auto;
+      iIntros "Hret_store";
+      wp_auto;
+      wp_destroy_local "Hcurr";
+      iNext;
+      iAssert (nullptr |-> treeR q Leaf)%I as "Htree_leaf";
+      [ rewrite treeR_leaf _at_as_Rep; auto
+      | iDestruct ("Hwand" with "Htree_leaf") as "Htree";
+        iApply ("Hcont" $! nullptr with "[Htree]");
+        [ iFrame "Htree"; iPureIntro;
+          match goal with Hc : findNode _ _ = findNode _ _ |- _ => rewrite Hc end;
+          reflexivity
+        | iFrame "Hret_store";
+          iSplitL "Hpk"; [wp_finish_anyR | wp_finish_anyR] ] ] ]
+  | (* Node: cv ≠ nullptr, enter loop body *)
+    iDestruct (treeR_node_nonnull with "Htree_cv") as "[Htree_cv %Hcv_ne]";
+    iDestruct (treeR_node_valid with "Htree_cv") as "[Htree_cv #Hvalid_cv]";
+    iExists (Vbool true); rewrite /Vbool /=;
+    iSplit;
+    [ match goal with Hne : cv <> nullptr |- _ =>
+        iPoseProof (eval_ptr_nullptr_eq_l source
+          (fun _ : is_Some (ptr_vaddr cv) =>
+             bool_decide_eq_false_2 (cv = nullptr) Hne)
+          with "Hvalid_cv") as "Heq"
+      end;
+      iPoseProof (eval_ptr_neq source _Node cv nullptr false with "Heq")
+        as "[Himpure Htrue]";
+      rewrite /eval_binop;
+      iFrame "Htrue"; iRight; iExact "Himpure"
+    | wp_auto;
+      iApply (wp_if source); iNext;
+      (* Inline wp_unfold_node so variable bindings stay in Ltac scope *)
+      iRevert "Htree_cv"; rewrite _at_as_Rep; iIntros "Htree_cv";
+      let lp := fresh "_lp" in
+      let rp := fresh "_rp" in
+      let rc := fresh "_rc" in
+      iDestruct "Htree_cv" as (lp rp rc) "(_ntl & _ntr & _nnode)";
+      iDestruct "_nnode" as
+        "(_nrc & _ncolor & _nkey & _nval & _nleft & _nright & _nstruct)";
+      (* Extract persistent has_type for [k] before operand evaluation
+         consumes the spatial resources. This persists through all nested
+         [iSplit]s and is available at each [eval_binop] goal.
+         The [kn_tc] evidence is extracted inside [findNode_read_curr_key]
+         after [wp_offset] flattens the nested [_at]. *)
+      iDestruct (observe (has_type_or_undef (Vint k) Tint) with "Hpk") as "#_hty_k";
+      iApply (wp_operand_binop source);
+      rewrite /nd_seq;
+      iSplit;
+      [ wp_read_local "Hpk" (Vint k);
+        findNode_read_curr_key cv kn_tc;
+        findNode_after_inner1_eval kn_tc k cv n q t lp rp rc l_tc r_tc
+      | findNode_read_curr_key cv kn_tc;
+        wp_read_local "Hpk" (Vint k);
+        findNode_after_inner1_eval kn_tc k cv n q t lp rp rc l_tc r_tc ] ] ].
+
 Lemma findNode_ok :
   |-- func_ok source findNode_func findNode_spec.
 Proof using MOD.
@@ -190,194 +467,25 @@ Proof using MOD.
       rewrite /while_unroll.
       iApply (wp_if source).
       iNext.
-      (** Decompose [Ebinop Bneq] via [wp_operand_binop]. *)
+      (** Decompose [Ebinop Bneq] via [wp_operand_binop].
+          Both orderings share [findNode_after_outer_eval]. *)
       iApply (wp_operand_binop source).
       rewrite /nd_seq.
       iSplit.
       + (** Left ordering: evaluate [curr] first, then [nullptr]. *)
         wp_read_local "Hcurr" (Vptr cv).
-        (** Evaluate [nullptr]. *)
         wp_null_val.
-        (** Case-split on subtree structure. *)
-        destruct tc as [| c_tc l_tc kn_tc vn_tc r_tc].
-        ++ (** Leaf: [cv = nullptr], comparison yields false → [Sbreak]. *)
-           iDestruct (treeR_leaf_implies_null with "Htree_cv") as "%Hnull".
-           subst cv.
-           iExists (Vbool false). rewrite /Vbool /=.
-           iSplit.
-           { (** [eval_binop Bneq (Vptr nullptr) (Vptr nullptr) (Vint 0) ∗ True]
-                 Strategy: build [eval_binop_impure ... ∗ True] via pointer
-                 equality lemmas, then embed into [eval_binop] disjunction. *)
-             iPoseProof valid_ptr_nullptr as "Hvn".
-             iPoseProof (eval_ptr_self_eq source _Node nullptr with "Hvn")
-               as "Heq".
-             iPoseProof (eval_ptr_neq source _Node nullptr nullptr true
-               with "Heq") as "[Himpure Htrue]".
-             rewrite /eval_binop.
-             iFrame "Htrue". iRight. iExact "Himpure". }
-           (** Break from loop, process [return curr;] (= return nullptr). *)
-           wp_auto.
-           iIntros (ret_p).
-           (** Return expression: [Ecast Cnull2ptr Enull] = nullptr. *)
-           wp_auto.
-           (** Wand: [ret_p |-> tptsto_fuzzyR ... (Vptr nullptr) -* ...]. *)
-           iIntros "Hret_store".
-           (** Process interp, Kfree/Kreturn, reach destruction. *)
-           wp_auto.
-           (** Destroy [curr_p] local variable (primitive pointer type). *)
-           wp_destroy_local "Hcurr".
-           (** Now prove [▷ Q ret_p] using invariant resources. *)
-           iNext.
-           (** Reconstruct the tree via magic wand. *)
-           iAssert (nullptr |-> treeR q Leaf)%I as "Htree_leaf".
-           { rewrite treeR_leaf _at_as_Rep. auto. }
-           iDestruct ("Hwand" with "Htree_leaf") as "Htree".
-           (** Apply postcondition handler [Hcont] with ret=nullptr, ra=ret_p. *)
-           iApply ("Hcont" $! nullptr with "[Htree]").
-           { iFrame "Htree". iPureIntro. rewrite Hcorr. reflexivity. }
-           iFrame "Hret_store".
-           (** Need [pv |-> anyR Tint 1$m ** pv0 |-> anyR (Tptr _Node) 1$m].
-               Convert tptsto_fuzzyR to anyR via entailment. *)
-           iSplitL "Hpk".
-           { wp_finish_anyR. }
-           wp_finish_anyR.
-        ++ (** Node: [cv <> nullptr], comparison yields true → body. *)
-           (** Extract [valid_ptr cv] and [cv ≠ nullptr] from [treeR (Node ...)]. *)
-           iDestruct (treeR_node_nonnull with "Htree_cv") as "[Htree_cv %Hcv_ne]".
-           iDestruct (treeR_node_valid with "Htree_cv") as "[Htree_cv #Hvalid_cv]".
-           iExists (Vbool true). rewrite /Vbool /=.
-           iSplit.
-           { (** [eval_binop Bneq (Vptr cv) (Vptr nullptr) (Vbool true) ∗ True]
-                 Use [eval_ptr_nullptr_eq_l]: cv ≠ nullptr (from nonnullR)
-                 and valid_ptr cv (from structR) to show Beq yields false,
-                 then eval_ptr_neq flips to Bneq yields true (negb false). *)
-             iPoseProof (eval_ptr_nullptr_eq_l source
-               (fun _ : is_Some (ptr_vaddr cv) =>
-                  bool_decide_eq_false_2 (cv = nullptr) Hcv_ne)
-               with "Hvalid_cv") as "Heq".
-             iPoseProof (eval_ptr_neq source _Node cv nullptr false
-               with "Heq") as "[Himpure Htrue]".
-             rewrite /eval_binop.
-             iFrame "Htrue". iRight. iExact "Himpure". }
-           (** Strip [interp] + enter [Sseq [Sif ...]]. *)
-           wp_auto.
-           (** Inner [Sif]: test [k < curr->key]. *)
-           iApply (wp_if source).
-           iNext.
-           (** Unfold [treeR (Node ...)] to access fields. *)
-           wp_unfold_node "Htree_cv".
-           (** Evaluate [k < curr->key] via [wp_operand_binop]. *)
-           iApply (wp_operand_binop source).
-           rewrite /nd_seq.
-           iSplit.
-           { (** Left ordering: eval [k], then [curr->key]. *)
-             wp_read_local "Hpk" (Vint k).
-             (** Eval [curr->key]: l2r cast → member access → read_arrow. *)
-             iApply wp_operand_cast_l2r.
-             rewrite /wp_glval /=.
-             iApply wp_lval_member; [reflexivity |].
-             rewrite /read_arrow /=.
-             (** Inside read_arrow: evaluate [curr] pointer. *)
-             wp_read_local "Hcurr" (Vptr cv).
-             (** Observe [reference_to] for the struct, unfold read_decl. *)
-             iDestruct (observe (reference_to _ _) with "_nstruct") as "#_ref_cv".
-             iSplitR.
-             { iExact "_ref_cv". }
-             rewrite /read_decl /=.
-             (** Convert [_nkey] to offset form for [Observe] to fire. *)
-             wp_offset "_nkey".
-             (** Observe [reference_to Tint (cv ,, _key)] from [_nkey]. *)
-             iDestruct (observe (reference_to _ _) with "_nkey") as "#_ref_key".
-             iSplitR.
-             { iExact "_ref_key". }
-             (** Provide stored value and [initializedR] evidence. *)
-             wp_provide_value "_nkey" (Vint kn_tc).
-             (** Provide binop result: [k < kn_tc] is pure integer comparison. *)
-             iExists (Vbool (bool_decide (k < kn_tc)%Z)).
-             iSplit.
-             { (** [eval_binop Blt Tint Tint Tbool (Vint k) (Vint kn_tc) ...].
-                   Integer [<] is a pure binop; use [eval_lt].
-                   TODO: prove eval_binop preconditions (has_type_prop, etc.) *)
-               admit. }
-             (** [wp_if] continuation: case-split on [k < kn_tc]. *)
-             rewrite /Vbool /=.
-             destruct (bool_decide (k < kn_tc)%Z) eqn:Hlt.
-             - (** [k < kn_tc]: enter then branch (curr = curr->left). *)
-               wp_auto.
-               (** Goal: [wp_lval (Eassign (Evar "curr") (Ecast Cl2r
-                   (Emember ... "left" ...)) ...) ...].
-                   Apply assignment rule (eval2 rl: RHS first, then LHS). *)
-               iApply wp_lval_assign.
-               rewrite /=.
-               (** RHS: evaluate [curr->left] as operand.
-                   Same field-access pattern as [curr->key] above. *)
-               iApply wp_operand_cast_l2r.
-               rewrite /wp_glval /=.
-               iApply wp_lval_member; [reflexivity |].
-               rewrite /read_arrow /=.
-               wp_read_local "Hcurr" (Vptr cv).
-               iDestruct (observe (reference_to _ _) with "_nstruct") as "#_ref_cv2".
-               iSplitR.
-               { iExact "_ref_cv2". }
-               rewrite /read_decl /=.
-               wp_offset "_nleft".
-               iDestruct (observe (reference_to _ _) with "_nleft") as "#_ref_left".
-               iSplitR.
-               { iExact "_ref_left". }
-               wp_provide_value "_nleft" (Vptr _lp).
-               (** LHS: evaluate [curr] as lvalue → address [curr_p]. *)
-               iApply wp_lval_var.
-               rewrite /read_decl /_local /=.
-               iDestruct (observe (reference_to _ _) with "Hcurr") as "#_ref_curr2".
-               iFrame "_ref_curr2". iClear "_ref_curr2".
-               (** Assignment: provide writeable [anyR], receive [tptstoR]. *)
-               iSplitL "Hcurr".
-               { wp_finish_anyR. }
-               iIntros "Hcurr_new".
-               (** Handle [interp] for temporary cleanup, return to loop. *)
-               wp_auto.
-               (** Re-establish loop invariant with [cv' = _lp], [tc' = l_tc]. *)
-               iExists _lp, l_tc.
-               (** Convert [tptstoR] to [tptsto_fuzzyR] for the invariant. *)
-               iDestruct (tptstoR_to_fuzzyR with "Hcurr_new") as "Hcurr_new".
-               iFrame "Hcurr_new Hpk Hpn _ntl".
-               (** Remaining: [| findNode ... |] ∗ wand ∗ cont.
-                   Split pure part first (no hyps needed). *)
-               iSplitR.
-               { (** [findNode k t = findNode k l_tc]: [Hcorr] + [findNode_lt]. *)
-                 iPureIntro. rewrite Hcorr.
-                 apply findNode_lt. apply bool_decide_eq_true_1 in Hlt.
-                 exact Hlt. }
-               (** Remaining: wand ∗ cont.
-                   Separate wand construction from continuation. *)
-               iSplitL "Hwand _ntr _nrc _ncolor _nkey _nval _nleft _nright _nstruct".
-               { (** Magic wand: [_lp |-> treeR q l_tc -* n |-> treeR q t].
-                     Receive left subtree back, fold the node,
-                     apply [Hwand] to get the original tree. *)
-                 iIntros "Htl_back".
-                 iApply "Hwand".
-                 (** Goal is already [Exists lp rp rc, ...] (Fixpoint computed).
-                     Convert offset'd hypotheses back, provide existentials,
-                     and frame. *)
-                 iRevert "_nkey". rewrite -_at_offsetR. iIntros "_nkey".
-                 iRevert "_nleft". rewrite -_at_offsetR. iIntros "_nleft".
-                 iExists _lp, _rp, _rc.
-                 iFrame "Htl_back _ntr".
-                 iFrame "_nrc _ncolor _nkey _nval _nleft _nright _nstruct". }
-               iExact "Hcont".
-             - (** [k >= kn_tc]: enter else branch (test curr->key < k). *)
-               wp_auto.
-               admit. }
-           (** Right ordering: symmetric. *)
-           admit.
-      + (** Right ordering: symmetric to left. *)
-        admit. }
+        findNode_after_outer_eval cv tc k n q t.
+      + (** Right ordering: evaluate [nullptr] first, then [curr]. *)
+        wp_null_val.
+        wp_read_local "Hcurr" (Vptr cv).
+        findNode_after_outer_eval cv tc k n q t. }
     (** Establish invariant. *)
     iExists n, t.
     iFrame "Hcurr Hpk Hpn Htree Hcont".
     iSplitR.
     { iPureIntro. reflexivity. }
     iIntros "H". iExact "H".
-Admitted.
+Qed.
 
 End with_Sigma.
