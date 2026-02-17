@@ -153,8 +153,7 @@ Definition findNode_spec : function_spec :=
 Ltac findNode_read_curr_key cv kn_tc :=
   wp_member_access;
   wp_read_local "Hcurr" (Vptr cv);
-  iDestruct (observe (reference_to _ _) with "_nstruct") as "#_obs";
-  iSplitR; [iExact "_obs" |]; iClear "_obs";
+  wp_observe_ref "_nstruct";
   rewrite /read_decl /=;
   wp_offset "_nkey";
   (* Extract has_type_prop for kn_tc as a pure Coq hypothesis.
@@ -170,8 +169,7 @@ Ltac findNode_read_curr_key cv kn_tc :=
     iDestruct (observe ([| has_type_prop (Vint kn_tc) Tint |]) with "_nkey")
       as "%_htp_kn"
   end;
-  iDestruct (observe (reference_to _ _) with "_nkey") as "#_obs";
-  iSplitR; [iExact "_obs" |]; iClear "_obs";
+  wp_observe_ref "_nkey";
   wp_provide_value "_nkey" (Vint kn_tc).
 
 (** Innermost continuation: after evaluating both operands of [curr->key < k].
@@ -179,17 +177,7 @@ Ltac findNode_read_curr_key cv kn_tc :=
 Ltac findNode_after_inner2_eval kn_tc k cv n q t _lp _rp _rc r_tc :=
   iExists (Vbool (bool_decide (kn_tc < k)%Z));
   iSplit;
-  [ iSplitR; [| done];
-    rewrite /eval_binop;
-    iLeft;
-    (* _htp_kn : has_type_prop (Vint kn_tc) Tint — already pure from findNode_read_curr_key *)
-    (* Extract has_type_prop for k from has_type_or_undef *)
-    iRevert "_hty_k";
-    rewrite has_type_or_undef_unfold;
-    iIntros "[_htmp_k | %_habs]"; [| discriminate];
-    iDestruct (has_type_has_type_prop with "_htmp_k") as "%_htp_k";
-    iPureIntro;
-    eapply eval_lt; [solve [typeclasses eauto] | done | assumption | assumption]
+  [ wp_eval_int_lt "_hty_k"
   | rewrite /Vbool /=;
     destruct (bool_decide (kn_tc < k)%Z) eqn:Hgt;
     [ (* kn_tc < k: go right *)
@@ -199,11 +187,7 @@ Ltac findNode_after_inner2_eval kn_tc k cv n q t _lp _rp _rc r_tc :=
       wp_member_access;
       wp_read_local "Hcurr" (Vptr cv);
       wp_struct_field "_nstruct" "_nright" (Vptr _rp);
-      iApply wp_lval_var;
-      rewrite /read_decl /_local /=;
-      iDestruct (observe (reference_to _ _) with "Hcurr") as "#_obs";
-      iFrame "_obs"; iClear "_obs";
-      iSplitL "Hcurr"; [wp_finish_anyR |];
+      wp_assign_local "Hcurr";
       iIntros "Hcurr_new";
       wp_auto;
       iExists _rp, r_tc;
@@ -218,8 +202,8 @@ Ltac findNode_after_inner2_eval kn_tc k cv n q t _lp _rp _rc r_tc :=
       | iSplitL "Hwand _ntl _nrc _ncolor _nkey _nval _nleft _nright _nstruct";
         [ iIntros "Htr_back";
           iApply "Hwand";
-          iRevert "_nkey"; rewrite -_at_offsetR; iIntros "_nkey";
-          iRevert "_nright"; rewrite -_at_offsetR; iIntros "_nright";
+          wp_revert_offset "_nkey";
+          wp_revert_offset "_nright";
           iExists _lp, _rp, _rc;
           iFrame "_ntl Htr_back";
           iFrame "_nrc _ncolor _nkey _nval _nleft _nright _nstruct"
@@ -233,7 +217,7 @@ Ltac findNode_after_inner2_eval kn_tc k cv n q t _lp _rp _rc r_tc :=
       wp_auto;
       wp_destroy_local "Hcurr";
       iNext;
-      iRevert "_nkey"; rewrite -_at_offsetR; iIntros "_nkey";
+      wp_revert_offset "_nkey";
       iAssert (n |-> treeR q t)%I
         with "[Hwand _ntl _ntr _nrc _ncolor _nkey _nval _nleft _nright _nstruct]"
         as "Htree";
@@ -261,17 +245,7 @@ Ltac findNode_after_inner2_eval kn_tc k cv n q t _lp _rp _rc r_tc :=
 Ltac findNode_after_inner1_eval kn_tc k cv n q t _lp _rp _rc l_tc r_tc :=
   iExists (Vbool (bool_decide (k < kn_tc)%Z));
   iSplit;
-  [ iSplitR; [| done];
-    rewrite /eval_binop;
-    iLeft;
-    (* _htp_kn : has_type_prop (Vint kn_tc) Tint — already pure from findNode_read_curr_key *)
-    (* Extract has_type_prop for k from has_type_or_undef *)
-    iRevert "_hty_k";
-    rewrite has_type_or_undef_unfold;
-    iIntros "[_htmp_k | %_habs]"; [| discriminate];
-    iDestruct (has_type_has_type_prop with "_htmp_k") as "%_htp_k";
-    iPureIntro;
-    eapply eval_lt; [solve [typeclasses eauto] | done | assumption | assumption]
+  [ wp_eval_int_lt "_hty_k"
   | rewrite /Vbool /=;
     destruct (bool_decide (k < kn_tc)%Z) eqn:Hlt;
     [ (* k < kn_tc: go left *)
@@ -281,11 +255,7 @@ Ltac findNode_after_inner1_eval kn_tc k cv n q t _lp _rp _rc l_tc r_tc :=
       wp_member_access;
       wp_read_local "Hcurr" (Vptr cv);
       wp_struct_field "_nstruct" "_nleft" (Vptr _lp);
-      iApply wp_lval_var;
-      rewrite /read_decl /_local /=;
-      iDestruct (observe (reference_to _ _) with "Hcurr") as "#_obs";
-      iFrame "_obs"; iClear "_obs";
-      iSplitL "Hcurr"; [wp_finish_anyR |];
+      wp_assign_local "Hcurr";
       iIntros "Hcurr_new";
       wp_auto;
       iExists _lp, l_tc;
@@ -300,8 +270,8 @@ Ltac findNode_after_inner1_eval kn_tc k cv n q t _lp _rp _rc l_tc r_tc :=
       | iSplitL "Hwand _ntr _nrc _ncolor _nkey _nval _nleft _nright _nstruct";
         [ iIntros "Htl_back";
           iApply "Hwand";
-          iRevert "_nkey"; rewrite -_at_offsetR; iIntros "_nkey";
-          iRevert "_nleft"; rewrite -_at_offsetR; iIntros "_nleft";
+          wp_revert_offset "_nkey";
+          wp_revert_offset "_nleft";
           iExists _lp, _rp, _rc;
           iFrame "Htl_back _ntr";
           iFrame "_nrc _ncolor _nkey _nval _nleft _nright _nstruct"
@@ -309,7 +279,7 @@ Ltac findNode_after_inner1_eval kn_tc k cv n q t _lp _rp _rc l_tc r_tc :=
     | (* k >= kn_tc: inner comparison [curr->key < k] *)
       wp_auto;
       iApply (wp_if source); iNext;
-      iRevert "_nkey"; rewrite -_at_offsetR; iIntros "_nkey";
+      wp_revert_offset "_nkey";
       wp_binop source
         ltac:(findNode_read_curr_key cv kn_tc)
         ltac:(wp_read_local "Hpk" (Vint k))

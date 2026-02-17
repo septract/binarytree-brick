@@ -26,6 +26,12 @@
     - [wp_expr_step] — Expression-level AST dispatcher (experimental).
     - [wp_step] — One mechanical wp proof step (AST-driven dispatch).
     - [wp_auto] — Repeat [wp_step] until stuck (user provides only semantic steps).
+
+    Round 2 (2026-02-17):
+    - [wp_revert_offset H] — Convert [(p ,, f) |-> R] back to [p |-> (f |-> R)] (inverse of [wp_offset]).
+    - [wp_observe_ref H] — Observe [reference_to] + provide + clear (3 lines → 1).
+    - [wp_assign_local H_local] — L-value target of [local = rhs] (5 lines → 1).
+    - [wp_eval_int_lt H_hty] — Prove [eval_binop] for integer [<] (9 lines → 1).
 *)
 
 From Coq Require Import ZArith.
@@ -356,6 +362,23 @@ Ltac wp_unfold_node H :=
 Ltac wp_offset H :=
   iDestruct (at_offsetR_intro with H) as H.
 
+(** ** [wp_revert_offset H] — Convert [(p ,, f) |-> R] back to [p |-> (f |-> R)]
+
+    Inverse of [wp_offset]. Needed before applying magic wands that
+    expect the nested-offset form (e.g. reconstructing [treeR (Node ...)]
+    from individual field assertions).
+
+    [H] names the Iris hypothesis holding [(p ,, f) |-> R].
+    After the tactic, [H] holds [p |-> (f |-> R)].
+
+    Replaces:
+<<
+      iRevert H; rewrite -_at_offsetR; iIntros H.
+>>
+*)
+Ltac wp_revert_offset H :=
+  iRevert H; rewrite -_at_offsetR; iIntros H.
+
 (** ** [wp_provide_value H v] — Provide [initializedR] evidence from [primR]
 
     [H] names the Iris hypothesis holding [(p ,, f) |-> primR ty q v]
@@ -411,11 +434,31 @@ Ltac wp_member_access :=
   iApply wp_lval_member; [reflexivity |];
   rewrite /read_arrow /=.
 
+(** ** [wp_observe_ref H] — observe [reference_to] + provide + clear
+
+    Extracts a persistent [reference_to] fact from hypothesis [H],
+    provides it to satisfy the current [iSplitR] subgoal, and clears
+    the temporary.
+
+    [H] names the Iris hypothesis holding a [structR] or [primR] from
+    which [reference_to] can be observed.
+
+    Replaces:
+<<
+      iDestruct (observe (reference_to _ _) with H) as "#_obs";
+      iSplitR; [iExact "_obs" |]; iClear "_obs".
+>>
+*)
+Ltac wp_observe_ref H :=
+  iDestruct (observe (reference_to _ _) with H) as "#_obs";
+  iSplitR; [iExact "_obs" |]; iClear "_obs".
+
 (** ** [wp_struct_field H_struct H_field v] — observe + offset + provide value
 
     After reading the parent pointer, this handles the [reference_to] observe
     from the struct, the [read_decl] + field offset conversion, and the value
-    provision.
+    provision.  Composes [wp_observe_ref] twice: once for the struct identity
+    and once for the field after offset conversion.
 
     [H_struct] is the hypothesis for the struct identity ([structR]).
     [H_field] is the hypothesis for the field ([primR] / [ptrR]).
@@ -423,23 +466,80 @@ Ltac wp_member_access :=
 
     Replaces:
 <<
-      iDestruct (observe (reference_to _ _) with H_struct) as "#_obs";
-      iSplitR; [iExact "_obs" |]; iClear "_obs";
+      wp_observe_ref H_struct;
       rewrite /read_decl /=;
       wp_offset H_field;
-      iDestruct (observe (reference_to _ _) with H_field) as "#_obs";
-      iSplitR; [iExact "_obs" |]; iClear "_obs";
+      wp_observe_ref H_field;
       wp_provide_value H_field v.
 >>
 *)
 Ltac wp_struct_field H_struct H_field v :=
-  iDestruct (observe (reference_to _ _) with H_struct) as "#_obs";
-  iSplitR; [iExact "_obs" |]; iClear "_obs";
+  wp_observe_ref H_struct;
   rewrite /read_decl /=;
   wp_offset H_field;
-  iDestruct (observe (reference_to _ _) with H_field) as "#_obs";
-  iSplitR; [iExact "_obs" |]; iClear "_obs";
+  wp_observe_ref H_field;
   wp_provide_value H_field v.
+
+(** ** [wp_assign_local H_local] — l-value target of [local = rhs]
+
+    After the RHS of an assignment is evaluated, this handles the l-value
+    target: resolves the local variable, provides [reference_to] evidence
+    (via [wp_observe_ref]), and transfers ownership (old value → [anyR]).
+
+    [H_local] names the Iris hypothesis holding [tptsto_fuzzyR] for the
+    local variable being assigned to.
+
+    After the tactic, [iIntros "H_new"] binds the fresh [tptstoR] for
+    the updated local.
+
+    Replaces:
+<<
+      iApply wp_lval_var;
+      rewrite /read_decl /_local /=;
+      iDestruct (observe (reference_to _ _) with H_local) as "#_obs";
+      iFrame "_obs"; iClear "_obs";
+      iSplitL H_local; [wp_finish_anyR |].
+>>
+*)
+Ltac wp_assign_local H_local :=
+  iApply wp_lval_var;
+  rewrite /read_decl /_local /=;
+  wp_observe_ref H_local;
+  iSplitL H_local; [wp_finish_anyR |].
+
+(** ** [wp_eval_int_lt H_hty] — prove [eval_binop] for integer [<]
+
+    After both operands of a [<] comparison are evaluated, proves the
+    [eval_binop] obligation. Extracts [has_type_prop] from a persistent
+    [has_type_or_undef] hypothesis, then applies [eval_lt].
+
+    [H_hty] names the persistent ([#]-prefixed) Iris hypothesis holding
+    [has_type_or_undef (Vint _) Tint]. Since it's persistent, it survives
+    the tactic and can be reused across multiple comparisons.
+
+    Replaces:
+<<
+      iSplitR; [| done];
+      rewrite /eval_binop;
+      iLeft;
+      iRevert H_hty;
+      rewrite has_type_or_undef_unfold;
+      iIntros "[_htmp | %_habs]"; [| discriminate];
+      iDestruct (has_type_has_type_prop with "_htmp") as "%_htp";
+      iPureIntro;
+      eapply eval_lt; [solve [typeclasses eauto] | done | assumption | assumption].
+>>
+*)
+Ltac wp_eval_int_lt H_hty :=
+  iSplitR; [| done];
+  rewrite /eval_binop;
+  iLeft;
+  iRevert H_hty;
+  rewrite has_type_or_undef_unfold;
+  iIntros "[_htmp | %_habs]"; [| discriminate];
+  iDestruct (has_type_has_type_prop with "_htmp") as "%_htp";
+  iPureIntro;
+  eapply eval_lt; [solve [typeclasses eauto] | done | assumption | assumption].
 
 (** ** [wp_binop tu eval_a eval_b kont] — nd_seq deduplication for binops
 
