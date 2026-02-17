@@ -20,6 +20,10 @@
     - [wp_unfold_node H] — Destructure [treeR (Node ...)] into field hypotheses (3 lines → 1).
     - [wp_offset H] — Convert [p |-> (f |-> R)] to [(p ,, f) |-> R] (~3 lines → 1).
     - [wp_provide_value H v] — Provide [initializedR] evidence from [primR] (~8 lines → 1).
+    - [wp_member_access] — Structural prefix for [ptr->field] access (4 lines → 1).
+    - [wp_struct_field H_struct H_field v] — Observe + offset + provide value (8 lines → 1).
+    - [wp_binop tu eval_a eval_b kont] — Deduplicate [nd_seq] orderings (6+ lines → 1).
+    - [wp_expr_step] — Expression-level AST dispatcher (experimental).
     - [wp_step] — One mechanical wp proof step (AST-driven dispatch).
     - [wp_auto] — Repeat [wp_step] until stuck (user provides only semantic steps).
 *)
@@ -387,6 +391,86 @@ Ltac wp_provide_value H v :=
     iFrame "_pv_tptsto"; iExact "_pv_type"
   | ].
 
+(** ** [wp_member_access] — structural prefix for [ptr->field] access
+
+    Handles the l2r cast → member access → arrow dereference prefix that
+    appears before every field read through a pointer.  Purely structural:
+    no arguments needed.
+
+    Replaces:
+<<
+      iApply wp_operand_cast_l2r;
+      rewrite /wp_glval /=;
+      iApply wp_lval_member; [reflexivity |];
+      rewrite /read_arrow /=.
+>>
+*)
+Ltac wp_member_access :=
+  iApply wp_operand_cast_l2r;
+  rewrite /wp_glval /=;
+  iApply wp_lval_member; [reflexivity |];
+  rewrite /read_arrow /=.
+
+(** ** [wp_struct_field H_struct H_field v] — observe + offset + provide value
+
+    After reading the parent pointer, this handles the [reference_to] observe
+    from the struct, the [read_decl] + field offset conversion, and the value
+    provision.
+
+    [H_struct] is the hypothesis for the struct identity ([structR]).
+    [H_field] is the hypothesis for the field ([primR] / [ptrR]).
+    [v] is the expected value (e.g. [Vptr lp]).
+
+    Replaces:
+<<
+      iDestruct (observe (reference_to _ _) with H_struct) as "#_obs";
+      iSplitR; [iExact "_obs" |]; iClear "_obs";
+      rewrite /read_decl /=;
+      wp_offset H_field;
+      iDestruct (observe (reference_to _ _) with H_field) as "#_obs";
+      iSplitR; [iExact "_obs" |]; iClear "_obs";
+      wp_provide_value H_field v.
+>>
+*)
+Ltac wp_struct_field H_struct H_field v :=
+  iDestruct (observe (reference_to _ _) with H_struct) as "#_obs";
+  iSplitR; [iExact "_obs" |]; iClear "_obs";
+  rewrite /read_decl /=;
+  wp_offset H_field;
+  iDestruct (observe (reference_to _ _) with H_field) as "#_obs";
+  iSplitR; [iExact "_obs" |]; iClear "_obs";
+  wp_provide_value H_field v.
+
+(** ** [wp_binop tu eval_a eval_b kont] — nd_seq deduplication for binops
+
+    Every [wp_operand_binop] requires proving both operand orderings with
+    identical continuations.  This tactic takes:
+    - [tu]: translation unit (e.g. [source])
+    - [eval_a], [eval_b]: tactic arguments evaluating each operand
+    - [kont]: continuation tactic applied after both operands
+
+    The [eval_a]/[eval_b]/[kont] arguments are passed via [ltac:(...)]:
+<<
+      wp_binop source
+        ltac:(wp_read_local "Hcurr" (Vptr cv))
+        ltac:(wp_null_val)
+        ltac:(findNode_after_outer_eval cv tc k n q t).
+>>
+
+    Replaces:
+<<
+      iApply (wp_operand_binop source).
+      rewrite /nd_seq.
+      iSplit.
+      + eval_a. eval_b. kont.
+      + eval_b. eval_a. kont.
+>>
+*)
+Ltac wp_binop tu eval_a eval_b kont :=
+  iApply (wp_operand_binop tu);
+  rewrite /nd_seq;
+  iSplit; [ eval_a; eval_b; kont | eval_b; eval_a; kont ].
+
 (** ** Meta-tactic: wp proof automation
 
     [wp_step] performs one mechanical wp proof step by trying rules in
@@ -458,3 +542,33 @@ Ltac wp_step :=
     Terminates because each step makes progress (changes the goal)
     and the AST is finite. *)
 Ltac wp_auto := repeat wp_step.
+
+(** ** [wp_expr_step] — expression-level AST dispatcher (experimental)
+
+    Dispatches on the head AST constructor of expression-level wp goals.
+    Complements [wp_step] (which handles statement-level constructs)
+    without modifying that battle-tested tactic.
+
+    Uses [lazymatch] so failures propagate immediately (no silent
+    backtracking).  The [Ecast Cl2r (Evar _ _)] case only peels the
+    l2r cast (needs user-supplied hypothesis name and value for the
+    full [wp_read_local]).
+
+    Note: matching on large cpp2v expressions (95K lines) may be slow.
+    If [lazymatch] performance degrades, restrict to smaller pattern sets.
+*)
+Ltac wp_expr_step :=
+  lazymatch goal with
+  | |- environments.envs_entails _
+       (wp_operand _ _ (Ecast Cl2r (Emember _ _ _ _ _)) _) =>
+      wp_member_access
+  | |- environments.envs_entails _
+       (wp_operand _ _ (Ecast Cnull2ptr _) _) =>
+      wp_null_val
+  | |- environments.envs_entails _
+       (wp_operand _ _ (Ecast Cl2r (Evar _ _)) _) =>
+      (* Can't fully dispatch — needs H and v arguments.
+         Just peel the l2r cast as a partial step. *)
+      iApply wp_operand_cast_l2r; rewrite /wp_glval /=
+  | _ => wp_step
+  end.

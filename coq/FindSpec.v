@@ -151,10 +151,7 @@ Definition findNode_spec : function_spec :=
 
 (** Read [curr->key] via field access chain. *)
 Ltac findNode_read_curr_key cv kn_tc :=
-  iApply wp_operand_cast_l2r;
-  rewrite /wp_glval /=;
-  iApply wp_lval_member; [reflexivity |];
-  rewrite /read_arrow /=;
+  wp_member_access;
   wp_read_local "Hcurr" (Vptr cv);
   iDestruct (observe (reference_to _ _) with "_nstruct") as "#_obs";
   iSplitR; [iExact "_obs" |]; iClear "_obs";
@@ -199,18 +196,9 @@ Ltac findNode_after_inner2_eval kn_tc k cv n q t _lp _rp _rc r_tc :=
       wp_auto;
       iApply wp_lval_assign;
       rewrite /=;
-      iApply wp_operand_cast_l2r;
-      rewrite /wp_glval /=;
-      iApply wp_lval_member; [reflexivity |];
-      rewrite /read_arrow /=;
+      wp_member_access;
       wp_read_local "Hcurr" (Vptr cv);
-      iDestruct (observe (reference_to _ _) with "_nstruct") as "#_obs";
-      iSplitR; [iExact "_obs" |]; iClear "_obs";
-      rewrite /read_decl /=;
-      wp_offset "_nright";
-      iDestruct (observe (reference_to _ _) with "_nright") as "#_obs";
-      iSplitR; [iExact "_obs" |]; iClear "_obs";
-      wp_provide_value "_nright" (Vptr _rp);
+      wp_struct_field "_nstruct" "_nright" (Vptr _rp);
       iApply wp_lval_var;
       rewrite /read_decl /_local /=;
       iDestruct (observe (reference_to _ _) with "Hcurr") as "#_obs";
@@ -290,18 +278,9 @@ Ltac findNode_after_inner1_eval kn_tc k cv n q t _lp _rp _rc l_tc r_tc :=
       wp_auto;
       iApply wp_lval_assign;
       rewrite /=;
-      iApply wp_operand_cast_l2r;
-      rewrite /wp_glval /=;
-      iApply wp_lval_member; [reflexivity |];
-      rewrite /read_arrow /=;
+      wp_member_access;
       wp_read_local "Hcurr" (Vptr cv);
-      iDestruct (observe (reference_to _ _) with "_nstruct") as "#_obs";
-      iSplitR; [iExact "_obs" |]; iClear "_obs";
-      rewrite /read_decl /=;
-      wp_offset "_nleft";
-      iDestruct (observe (reference_to _ _) with "_nleft") as "#_obs";
-      iSplitR; [iExact "_obs" |]; iClear "_obs";
-      wp_provide_value "_nleft" (Vptr _lp);
+      wp_struct_field "_nstruct" "_nleft" (Vptr _lp);
       iApply wp_lval_var;
       rewrite /read_decl /_local /=;
       iDestruct (observe (reference_to _ _) with "Hcurr") as "#_obs";
@@ -331,15 +310,10 @@ Ltac findNode_after_inner1_eval kn_tc k cv n q t _lp _rp _rc l_tc r_tc :=
       wp_auto;
       iApply (wp_if source); iNext;
       iRevert "_nkey"; rewrite -_at_offsetR; iIntros "_nkey";
-      iApply (wp_operand_binop source);
-      rewrite /nd_seq;
-      iSplit;
-      [ findNode_read_curr_key cv kn_tc;
-        wp_read_local "Hpk" (Vint k);
-        findNode_after_inner2_eval kn_tc k cv n q t _lp _rp _rc r_tc
-      | wp_read_local "Hpk" (Vint k);
-        findNode_read_curr_key cv kn_tc;
-        findNode_after_inner2_eval kn_tc k cv n q t _lp _rp _rc r_tc ] ] ].
+      wp_binop source
+        ltac:(findNode_read_curr_key cv kn_tc)
+        ltac:(wp_read_local "Hpk" (Vint k))
+        ltac:(findNode_after_inner2_eval kn_tc k cv n q t _lp _rp _rc r_tc) ] ].
 
 (** Outer continuation: after evaluating both operands of [curr != nullptr].
     Case-splits on [tc]: Leaf (exit loop) or Node (enter body). *)
@@ -404,15 +378,10 @@ Ltac findNode_after_outer_eval cv tc k n q t :=
          The [kn_tc] evidence is extracted inside [findNode_read_curr_key]
          after [wp_offset] flattens the nested [_at]. *)
       iDestruct (observe (has_type_or_undef (Vint k) Tint) with "Hpk") as "#_hty_k";
-      iApply (wp_operand_binop source);
-      rewrite /nd_seq;
-      iSplit;
-      [ wp_read_local "Hpk" (Vint k);
-        findNode_read_curr_key cv kn_tc;
-        findNode_after_inner1_eval kn_tc k cv n q t lp rp rc l_tc r_tc
-      | findNode_read_curr_key cv kn_tc;
-        wp_read_local "Hpk" (Vint k);
-        findNode_after_inner1_eval kn_tc k cv n q t lp rp rc l_tc r_tc ] ] ].
+      wp_binop source
+        ltac:(wp_read_local "Hpk" (Vint k))
+        ltac:(findNode_read_curr_key cv kn_tc)
+        ltac:(findNode_after_inner1_eval kn_tc k cv n q t lp rp rc l_tc r_tc) ] ].
 
 Lemma findNode_ok :
   |-- func_ok source findNode_func findNode_spec.
@@ -467,19 +436,12 @@ Proof using MOD.
       rewrite /while_unroll.
       iApply (wp_if source).
       iNext.
-      (** Decompose [Ebinop Bneq] via [wp_operand_binop].
+      (** Decompose [Ebinop Bneq] via [wp_binop].
           Both orderings share [findNode_after_outer_eval]. *)
-      iApply (wp_operand_binop source).
-      rewrite /nd_seq.
-      iSplit.
-      + (** Left ordering: evaluate [curr] first, then [nullptr]. *)
-        wp_read_local "Hcurr" (Vptr cv).
-        wp_null_val.
-        findNode_after_outer_eval cv tc k n q t.
-      + (** Right ordering: evaluate [nullptr] first, then [curr]. *)
-        wp_null_val.
-        wp_read_local "Hcurr" (Vptr cv).
-        findNode_after_outer_eval cv tc k n q t. }
+      wp_binop source
+        ltac:(wp_read_local "Hcurr" (Vptr cv))
+        ltac:(wp_null_val)
+        ltac:(findNode_after_outer_eval cv tc k n q t). }
     (** Establish invariant. *)
     iExists n, t.
     iFrame "Hcurr Hpk Hpn Htree Hcont".
