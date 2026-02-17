@@ -39,7 +39,8 @@ GEN_NAMES := $(COQ_DIR)/map_int_int_cpp_names.v
 # Coq source files (order matters for dependency chain)
 # Note: FindSpec_draft.v is a prototype with a hand-transcribed AST (not built).
 # FindSpec.v extracts the function from source's symbol table (the correct way).
-COQ_SRCS := $(COQ_DIR)/RBTree.v \
+COQ_SRCS := $(COQ_DIR)/WpTactics.v \
+            $(COQ_DIR)/RBTree.v \
             $(COQ_DIR)/TreeRep.v \
             $(COQ_DIR)/Tactics.v \
             $(COQ_DIR)/FindSpec.v \
@@ -82,6 +83,10 @@ $(COQ_DIR)/map_int_int_cpp.vo: $(COQ_DIR)/map_int_int_cpp.v $(COQ_DIR)/map_int_i
 # reference the C++ function definitions.
 ast: $(COQ_DIR)/map_int_int_cpp.vo
 
+# Generic wp tactics (no tree dependencies).
+$(COQ_DIR)/WpTactics.vo: $(COQ_DIR)/WpTactics.v
+	$(COQC) $(COQFLAGS) $<
+
 # Hand-written proof files.
 $(COQ_DIR)/RBTree.vo: $(COQ_DIR)/RBTree.v
 	$(COQC) $(COQFLAGS) $<
@@ -89,8 +94,8 @@ $(COQ_DIR)/RBTree.vo: $(COQ_DIR)/RBTree.v
 $(COQ_DIR)/TreeRep.vo: $(COQ_DIR)/TreeRep.v $(COQ_DIR)/RBTree.vo
 	$(COQC) $(COQFLAGS) $<
 
-# Custom wp automation tactics + tree lemmas.
-$(COQ_DIR)/Tactics.vo: $(COQ_DIR)/Tactics.v $(COQ_DIR)/RBTree.vo $(COQ_DIR)/TreeRep.vo
+# Tree-specific tactics + lemmas (depends on generic WpTactics).
+$(COQ_DIR)/Tactics.vo: $(COQ_DIR)/Tactics.v $(COQ_DIR)/RBTree.vo $(COQ_DIR)/TreeRep.vo $(COQ_DIR)/WpTactics.vo
 	$(COQC) $(COQFLAGS) $<
 
 # FindSpec extracts findNode from the generated AST's symbol table.
@@ -106,7 +111,8 @@ $(COQ_DIR)/RefCount.vo: $(COQ_DIR)/RefCount.v $(COQ_DIR)/RBTree.vo $(COQ_DIR)/Tr
 $(COQ_DIR)/Invariants.vo: $(COQ_DIR)/Invariants.v $(COQ_DIR)/RBTree.vo
 	$(COQC) $(COQFLAGS) $<
 
-proofs: $(COQ_DIR)/RBTree.vo $(COQ_DIR)/TreeRep.vo \
+proofs: $(COQ_DIR)/WpTactics.vo \
+        $(COQ_DIR)/RBTree.vo $(COQ_DIR)/TreeRep.vo \
         $(COQ_DIR)/Tactics.vo $(COQ_DIR)/FindSpec.vo \
         $(COQ_DIR)/InsertSpec.vo \
         $(COQ_DIR)/RefCount.vo $(COQ_DIR)/Invariants.vo

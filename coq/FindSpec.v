@@ -294,12 +294,7 @@ Ltac findNode_after_outer_eval cv tc k n q t :=
     subst;
     iExists (Vbool false); rewrite /Vbool /=;
     iSplit;
-    [ iPoseProof valid_ptr_nullptr as "Hvn";
-      iPoseProof (eval_ptr_self_eq source _Node nullptr with "Hvn") as "Heq";
-      iPoseProof (eval_ptr_neq source _Node nullptr nullptr true with "Heq")
-        as "[Himpure Htrue]";
-      rewrite /eval_binop;
-      iFrame "Htrue"; iRight; iExact "Himpure"
+    [ wp_eval_ptr_neq_null source _Node
     | wp_auto;
       let ret_p := fresh "ret_p" in
       iIntros (ret_p);
@@ -322,16 +317,7 @@ Ltac findNode_after_outer_eval cv tc k n q t :=
     iDestruct (treeR_node_valid with "Htree_cv") as "[Htree_cv #Hvalid_cv]";
     iExists (Vbool true); rewrite /Vbool /=;
     iSplit;
-    [ match goal with Hne : cv <> nullptr |- _ =>
-        iPoseProof (eval_ptr_nullptr_eq_l source
-          (fun _ : is_Some (ptr_vaddr cv) =>
-             bool_decide_eq_false_2 (cv = nullptr) Hne)
-          with "Hvalid_cv") as "Heq"
-      end;
-      iPoseProof (eval_ptr_neq source _Node cv nullptr false with "Heq")
-        as "[Himpure Htrue]";
-      rewrite /eval_binop;
-      iFrame "Htrue"; iRight; iExact "Himpure"
+    [ wp_eval_ptr_neq_nonnull source _Node "Hvalid_cv"
     | wp_auto;
       iApply (wp_if source); iNext;
       (* Inline wp_unfold_node so variable bindings stay in Ltac scope *)
