@@ -102,7 +102,7 @@ $(COQ_DIR)/Tactics.vo: $(COQ_DIR)/Tactics.v $(COQ_DIR)/RBTree.vo $(COQ_DIR)/Tree
 $(COQ_DIR)/FindSpec.vo: $(COQ_DIR)/FindSpec.v $(COQ_DIR)/RBTree.vo $(COQ_DIR)/TreeRep.vo $(COQ_DIR)/map_int_int_cpp.vo $(COQ_DIR)/Tactics.vo
 	$(COQC) $(COQFLAGS) $<
 
-$(COQ_DIR)/InsertSpec.vo: $(COQ_DIR)/InsertSpec.v $(COQ_DIR)/RBTree.vo $(COQ_DIR)/TreeRep.vo $(COQ_DIR)/Tactics.vo
+$(COQ_DIR)/InsertSpec.vo: $(COQ_DIR)/InsertSpec.v $(COQ_DIR)/RBTree.vo $(COQ_DIR)/TreeRep.vo $(COQ_DIR)/Tactics.vo $(COQ_DIR)/map_int_int_cpp.vo
 	$(COQC) $(COQFLAGS) $<
 
 $(COQ_DIR)/RefCount.vo: $(COQ_DIR)/RefCount.v $(COQ_DIR)/RBTree.vo $(COQ_DIR)/TreeRep.vo $(COQ_DIR)/Tactics.vo

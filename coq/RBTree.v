@@ -364,6 +364,53 @@ Proof.
   intros. unfold insert. apply isBST_makeBlack. apply isBST_ins. auto.
 Qed.
 
+(** ** Structural lemmas for InsertSpec.v *)
+
+(** [setRebalanceLeft] always returns a [Node], never a [Leaf]. *)
+Lemma setRebalanceLeft_is_node : forall c (nl : tree Z Z) k v (r : tree Z Z),
+  exists c' l' k' v' r', setRebalanceLeft c nl k v r = Node c' l' k' v' r'.
+Proof.
+  intros c nl k v r.
+  unfold setRebalanceLeft.
+  destruct c;
+  [ eexists; eexists; eexists; eexists; eexists; reflexivity |].
+  destruct nl as [| [] [| [] a kx vx b] ky vy [| [] b' ky' vy' c1]];
+    eexists; eexists; eexists; eexists; eexists; reflexivity.
+Qed.
+
+(** [setRebalanceRight] always returns a [Node], never a [Leaf]. *)
+Lemma setRebalanceRight_is_node : forall c (l : tree Z Z) k v (nr : tree Z Z),
+  exists c' l' k' v' r', setRebalanceRight c l k v nr = Node c' l' k' v' r'.
+Proof.
+  intros c l k v nr.
+  unfold setRebalanceRight.
+  destruct c;
+  [ eexists; eexists; eexists; eexists; eexists; reflexivity |].
+  destruct nr as [| [] [| [] a kx vx b] ky vy [| [] b' ky' vy' c1]];
+    eexists; eexists; eexists; eexists; eexists; reflexivity.
+Qed.
+
+(** [ins] always returns a [Node], never a [Leaf].
+    Needed in InsertSpec.v to unfold the result of [ins] before writing
+    [curr->color = black] (which requires a non-null pointer). *)
+Lemma ins_is_node : forall k v t,
+  exists c l k' v' r, ins k v t = Node c l k' v' r.
+Proof.
+  intros k v t. induction t as [| c l IHl kn vn r IHr].
+  - simpl. eexists; eexists; eexists; eexists; eexists; reflexivity.
+  - simpl.
+    destruct (k <? kn)%Z.
+    + apply setRebalanceLeft_is_node.
+    + destruct (kn <? k)%Z.
+      * apply setRebalanceRight_is_node.
+      * eexists; eexists; eexists; eexists; eexists; reflexivity.
+Qed.
+
+(** [makeBlack] on a [Node] sets color to [Black]. Trivial by computation. *)
+Lemma makeBlack_node : forall (c : Color) l (k v : Z) r,
+  makeBlack (Node c l k v r) = Node Black l k v r.
+Proof. reflexivity. Qed.
+
 (** ** NoRedRed preservation *)
 
 (** Children of a NoRedRed tree are NoRedRed. *)
