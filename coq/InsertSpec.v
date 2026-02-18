@@ -226,6 +226,11 @@ Proof. native_compute. reflexivity. Qed.
 Section with_Sigma.
 Context `{Sigma : cpp_logic} `{MOD: map_int_int_cpp.source ⊧ σ}.
 
+(** Persistent module resource — provides [code_at] for all functions
+    in the translation unit.  The auto framework supplies this via
+    [verify[source]]; for manual proofs we require it as a hypothesis. *)
+Hypothesis MODULE : |-- denoteModule source.
+
 (** ** makeCopy_spec
 
     Consumes input pointer [p], returns pointer [p'] with exclusive
@@ -372,39 +377,84 @@ Proof. Admitted.
     8. Show result equals [insert k v t] (by [makeBlack_node] + [ins_is_node])
     9. Return
 
-    Step 3 is the function call resolution — see module header for the
-    chain: [denoteModule] → [code_at_ok] → [func_ok] → [wp_fptr].
-
-    TODO(Round 5D): Resolve function call mechanics.  Currently Admitted
-    because the manual proof requires [denoteModule source] in the Iris
-    context (normally provided by the auto framework's [verify_spec]).
-    Options:
-    (a) Import [skylabs.auto.cpp.prelude.proof] and use [verify[source]]
-    (b) Add [denoteModule source] as a Section hypothesis
-    (c) Write a custom [wp_call_func] tactic
+    Step 3 uses [wp_call_direct] from [WpTactics.v]:
+    [denoteModule] → [code_at_of_denoteModule] → [code_at_ok] →
+    [func_ok] (= [ins_ok]) → [wp_fptr].
 *)
 (* ================================================================= *)
 
+(** Machine-checked proof that [ins_func] has a body. Required by
+    [code_at_of_denoteModule] to extract [code_at] from [denoteModule]. *)
+Lemma ins_has_body : exists body, ins_func.(f_body) = Some body.
+Proof. vm_compute. eexists. reflexivity. Qed.
+
 Lemma insert_ok :
   |-- func_ok source insert_func insert_spec.
-Proof using MOD.
-  (* TODO: Full proof requires resolving the call to [ins] inside
-     [insert]'s body.  This needs either:
-     - The auto framework ([verify[source] insert_spec] + [verify_spec])
-     - Manual [denoteModule source] hypothesis + [code_at_ok] + [ins_ok]
+Proof using MOD MODULE.
+  rewrite /func_ok. iSplit.
+  - iPureIntro. reflexivity.
+  - iIntros "!>" (Q vals) "Hspec".
+    iPoseProof MODULE as "#HMOD".
+    iApply wp_func_intro.
+    rewrite /insert_func /=.
+    (** Extract args: k, v, n from spec. *)
+    iDestruct "Hspec" as (pk vk pn vn pn0 vn0) "(%Hvals & Hpk & Hpv & Hpn & Hspec)".
+    subst vals. simpl.
+    iDestruct "Hspec" as (k v n t) "(%Hargs & Htree & Hcont)".
+    injection Hargs as -> ->. subst.
+    (** wp_auto through Sseq → Sdecl → wp_initialize scaffolding. *)
+    wp_auto.
+    (** At [∀ addr, wp_operand ... (Ecall ...) Q]. Introduce addr and
+        apply the Ecall rule to get [wp_call]. *)
+    iIntros (addr).
+    iApply wp_operand_call.
+    rewrite /wp_call /=.
+    (** Discharge [source ⊧ σ] from MOD. *)
+    iIntros "%_".
+    (** Unfold [Mbind] to expose [wp_operand] for function expression. *)
+    rewrite /wp.WPE.Mbind /wp.WPE.Mmap /=.
+    (** Resolve function expression: [Ecast Cfun2ptr (Eglobal ins_name t6062)].
+        Uses [wp_operand_cfun2ptr_global] which bridges the BRiCk alignment
+        gap for function types.  After this, the continuation is instantiated
+        at [Vptr (_global ins_name)] and we have [denoteModule] in scope. *)
+    iApply (wp_operand_cfun2ptr_global _ _ _ _ _ _ ins_lookup ins_has_body).
+    iSplitL "HMOD"; [iExact "HMOD" |].
+    (** Goal: continuation with [Vptr (_global ins_name)].
+        The existential for [fp] and the [nd_seqs] argument evaluation
+        remain.  Instantiate the function pointer. *)
+    iExists (_global ins_name).
+    iSplit; [iPureIntro; reflexivity |].
+    (** Goal: [nd_seqs [wp_arg "k"; wp_arg "v"; wp_arg "n"] (fun vs free => ...)]
+        where the continuation contains [|> wp_fptr ... (_global ins_name) vs Q'].
 
-     The proof structure (after call resolution) is:
-     1. [ins(k,v,n)] returns [curr_ptr |-> treeR 1 (ins k v t)]
-     2. Destruct [ins k v t = Node c' l' k' v' r'] via [ins_is_node]
-     3. [wp_unfold_node] on [curr_ptr] to access [_ncolor] field
-     4. Write [curr->color = black]: updates [_ncolor] from [c'] to [Black]
-     5. [treeR_node_fold] to reconstruct [treeR 1 (Node Black l' k' v' r')]
-     6. Rewrite via [makeBlack_node]: [Node Black l' k' v' r' = makeBlack (ins k v t)]
-     7. Unfold [insert]: [makeBlack (ins k v t) = insert k v t]
-     8. Return [curr_ptr]
+        Remaining proof steps (deferred — mechanical but tedious):
 
-     See [2026-02-17_insert_proof_strategy.md] for the full call resolution
-     chain involving [code_at_ok] from [compile.v]. *)
+        A. [nd_seqs] argument evaluation:
+           [nd_seqs] is universally quantified over all evaluation orderings.
+           For 3 arguments, introduce the ordering split, then for each
+           argument evaluate via [wp_arg] → [wp_read_local] → [tptsto_fuzzyR].
+           Each argument is an [Ecast Cl2r (Evar ...)]: a local variable read.
+
+        B. [wp_fptr] resolution:
+           After argument evaluation, the goal is:
+             [|> wp_fptr source.(types) ft (_global ins_name) [vk;vv;vn] Q']
+           Apply [wp_call_direct "HMOD" ins_lookup ins_has_body ins_ok]
+           to resolve via [code_at] + [func_ok] → [ins_spec.fs_spec vs Q'].
+
+        C. [ins_spec] precondition:
+           Instantiate [ins_spec.fs_spec] with [(k, v, n, t)]:
+           [n |-> treeR 1 t] (from [Htree]).
+
+        D. Post-call continuation:
+           After [ins] returns: [curr_ptr |-> treeR 1 (ins k v t)].
+           - Destruct via [ins_is_node]: [ins k v t = Node c' l' k' v' r']
+           - [wp_unfold_node] to access fields
+           - Write [curr->color = black] (field assignment)
+           - [treeR_node_fold] to reconstruct the tree
+           - Show [Node Black l' k' v' r' = insert k v t]
+             (by [makeBlack_node] + [ins_is_node] + definition of [insert])
+           - Return [curr_ptr]
+           - Clean up locals via [wp_destroy_local] *)
 Admitted.
 
 End with_Sigma.

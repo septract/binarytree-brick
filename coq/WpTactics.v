@@ -34,6 +34,13 @@
     - [wp_eval_ptr_neq_nonnull tu cls H_valid] — Prove [cv != nullptr] evaluates to true.
     - [wp_binop tu eval_a eval_b kont] — Deduplicate [nd_seq] orderings.
 
+    == Layer 2.5: Function Call Resolution ==
+
+    - [code_at_of_denoteModule] — Extract [code_at] from [denoteModule] via symbol lookup.
+    - [wp_fptr_of_func_ok] — Compose [code_at] + [func_ok] → [wp_fptr].
+    - [wp_operand_cfun2ptr_global] — Resolve [Ecast Cfun2ptr (Eglobal name ty)] (Admitted: BRiCk gap).
+    - [wp_call_direct HMOD lookup body func_ok] — One-liner for call sites.
+
     == Layer 3: Meta-Tactics ==
 
     - [wp_step] / [wp_auto] — Mechanical wp proof automation.
@@ -45,6 +52,7 @@ From Coq Require Export ZArith.
 Require Export skylabs.lang.cpp.cpp.
 Require Export skylabs.iris.extra.proofmode.proofmode.
 Export cQp_compat.
+Require Import skylabs.lang.cpp.compile.
 
 (* ================================================================= *)
 (** ** Layer 0: Entailment Lemmas *)
@@ -442,6 +450,161 @@ Ltac wp_binop tu eval_a eval_b kont :=
   iApply (wp_operand_binop tu);
   rewrite /nd_seq;
   iSplit; [ eval_a; eval_b; kont | eval_b; eval_a; kont ].
+
+(* ================================================================= *)
+(** ** Layer 2.5: Function Call Resolution *)
+(* ================================================================= *)
+
+(** When a wp proof reaches a function call [f(args)], the goal is:
+<<
+    |> wp_fptr tu.(types) ft (_global f_name) [v1; v2; ...] Q
+>>
+    Resolution requires three persistent facts chained together:
+
+    1. [denoteModule tu]: Section hypothesis (persistent, reusable).
+         Via [denoteModule_denoteSymbol] + symbol table lookup:
+         [_global f_name |-> as_Rep (code_at tu f)] ⊣⊢ [code_at tu f (_global f_name)]
+
+    2. [code_at tu f (_global f_name)]: persistent, from step 1.
+         Via [code_at_ok] axiom (from compile.v):
+         [∀ ls Q, wp_func tu f ls Q -* wp_fptr ... ls Q]
+
+    3. [func_ok tu f spec]: persistent, from the callee's proof.
+         [= □ (∀ Q vals, spec.(fs_spec) vals Q -* wp_func tu f vals Q)]
+
+    Composing: [spec.(fs_spec) vals Q -* wp_func -* wp_fptr]. *)
+
+Section wp_call_lemmas.
+Context `{Sigma : cpp_logic} {CU : genv}.
+
+(** Extract [code_at] from [denoteModule] for a function with a body.
+
+    [denoteModule] is persistent ([denoteModule_persistent]) so this can be
+    called any number of times for different functions with zero resource cost.
+
+    Chain: [denoteModule] → [denoteModule_denoteSymbol] (symbol lookup) →
+    [denoteSymbol] (unfolds [Ofunction f] with [Some body]) →
+    [_at_as_Rep] (converts [p |-> as_Rep Q] ⊣⊢ [Q p]) → [code_at tu f p].
+
+    Usage:
+<<
+    iPoseProof (code_at_of_denoteModule _ _ _ ins_lookup ins_has_body
+      with "HMOD") as "#Hca".
+>>
+*)
+Lemma code_at_of_denoteModule (tu : translation_unit) (f : Func)
+    (name : obj_name) :
+  tu.(symbols) !! name = Some (Ofunction f) ->
+  (exists body, f.(f_body) = Some body) ->
+  denoteModule tu |-- code_at tu f (_global name).
+Proof.
+  intros Hlookup [body Hbody].
+  etransitivity; first exact (denoteModule_denoteSymbol _ _ _ Hlookup).
+  rewrite /denoteSymbol /= Hbody _at_as_Rep. done.
+Qed.
+
+(** Resolve [wp_fptr] given [code_at], [func_ok], and the spec precondition.
+
+    Composes [code_at_ok] (compile axiom) with [func_ok] (callee proof) to
+    discharge [wp_fptr]. The only spatial resource consumed is [spec.(fs_spec)
+    vs Q] — both [code_at] and [func_ok] are persistent.
+
+    The [type_of_spec spec = type_of_value (Ofunction f)] pure fact from
+    [func_ok] is extracted but unused in this lemma; it is consumed as part
+    of the [func_ok] destructuring.
+
+    Usage:
+<<
+    iApply (wp_fptr_of_func_ok with "[$Hca $Hfok Hspec]").
+>>
+*)
+Lemma wp_fptr_of_func_ok (tu : translation_unit) (f : Func) (p : ptr)
+    (spec : function_spec) (vs : list ptr) (Q : ptr -> epred) :
+  code_at tu f p **
+  func_ok tu f spec **
+  spec.(fs_spec) vs Q
+  |-- wp_fptr tu.(types) (type_of_value (Ofunction f)) p vs Q.
+Proof.
+  iIntros "(Hca & Hfok & Hspec)".
+  iDestruct "Hfok" as "[%Hty #Hfunc]".
+  iPoseProof (code_at_ok tu f p with "Hca") as "Hca_ok".
+  iApply ("Hca_ok" $! vs Q).
+  iApply ("Hfunc" $! Q vs).
+  iExact "Hspec".
+Qed.
+
+(** Resolve [wp_operand (Ecast Cfun2ptr (Eglobal name ty)) Q] from [denoteModule].
+
+    Combines [wp_operand_cast_fun2ptr_cpp] (Cfun2ptr cast axiom) +
+    [wp_lval_global] + [read_decl] (global lvalue resolution) into
+    a single step, producing the continuation instantiated at
+    [Vptr (_global name)].
+
+    == Why this is Admitted ==
+
+    For function types, [read_decl] requires [reference_to (erase_qualifiers ty)]
+    which needs [aligned_ptr_ty] → [align_of ty = Some _]. The BRiCk axiom
+    system declares [align_of] as a [Parameter] with no axiom for [Tfunction],
+    making [aligned_ptr_ty (Tfunction _) p] unprovable through the standard chain.
+
+    The BRiCk developers acknowledge this gap at wp.v line 730:
+<<
+      (this rule has a problem with function references because
+       there is no alignment for functions)
+      Two options:
+      1. functions have 1 alignment
+      2. there is a special rule for [has_type (Vref r) (Tref (Tfunction ..))]
+         that ignores this
+>>
+
+    This lemma is semantically valid: the compiler places compiled functions
+    at valid, aligned addresses — a fact captured by [code_at] (which provides
+    [strict_valid_ptr]) but not expressible through [reference_to] due to the
+    missing alignment axiom.
+
+    This is NOT an [Axiom] — it is a deferred proof obligation (like [ins_ok]
+    and other [Admitted] function specs). It will become provable when the
+    upstream BRiCk library implements either fix mentioned above.
+
+    Proof sketch (blocked at step 6):
+    1. [wp_operand_cast_fun2ptr_cpp]: Cfun2ptr → [wp_lval]
+    2. [wp_lval_global]: Eglobal → [read_decl]
+    3. Unfold [read_decl] (default case for non-reference types)
+    4. Goal: [reference_to (erase_qualifiers ty) (_global name) ** Q ...]
+    5. Frame [Q] from hypothesis; extract [code_at] → [strict_valid_ptr]
+    6. BLOCKED: [reference_to] requires [aligned_ptr_ty] → [align_of = Some _] *)
+Lemma wp_operand_cfun2ptr_global (tu : translation_unit)
+    (ρ : region) (name : obj_name) (f : Func) (ty : type)
+    (Q : val -> FreeTemps -> mpred) :
+  tu.(symbols) !! name = Some (Ofunction f) ->
+  (exists body, f.(f_body) = Some body) ->
+  denoteModule tu ** Q (Vptr (_global name)) FreeTemps.id
+  |-- wp_operand tu ρ (Ecast Cfun2ptr (Eglobal name ty)) Q.
+Proof. Admitted.
+
+End wp_call_lemmas.
+
+(** Resolve a [wp_fptr] goal from [denoteModule] + [func_ok].
+
+    [HMOD]: name of persistent hypothesis holding [denoteModule tu]
+    [lookup_lemma]: proof that function is in the symbol table
+    [body_proof]: proof that function has a body ([exists body, f_body = Some _])
+    [func_ok_lemma]: proof of [|-- func_ok tu f spec]
+
+    After the tactic, the goal is [spec.(fs_spec) vs Q] —
+    the caller's precondition for the function being called.
+
+    Usage:
+<<
+    wp_call_direct "HMOD" ins_lookup ins_has_body ins_ok.
+>>
+*)
+Ltac wp_call_direct HMOD lookup_lemma body_proof func_ok_lemma :=
+  iNext;
+  iPoseProof (code_at_of_denoteModule _ _ _ lookup_lemma body_proof
+    with HMOD) as "#_call_ca";
+  iPoseProof func_ok_lemma as "#_call_fok";
+  iApply (wp_fptr_of_func_ok with "[$_call_ca $_call_fok]").
 
 (* ================================================================= *)
 (** ** Layer 3: Meta-Tactics *)
