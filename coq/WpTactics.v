@@ -40,6 +40,9 @@
     - [wp_fptr_of_func_ok] — Compose [code_at] + [func_ok] → [wp_fptr].
     - [wp_operand_cfun2ptr_global] — Resolve [Ecast Cfun2ptr (Eglobal name ty)] (Admitted: BRiCk gap).
     - [wp_call_direct HMOD lookup body func_ok] — One-liner for call sites.
+    - [wp_arg_prim eval_operand] — Evaluate one [wp_arg] for a primitive type.
+    - [wp_nd_args_step eval_operand] — One level of [nd_seqs'] dispatch.
+    - [wp_nd_args eval_operand] — Complete [nd_seqs] resolution for function calls.
 
     == Layer 3: Meta-Tactics ==
 
@@ -533,6 +536,32 @@ Proof.
   iExact "Hspec".
 Qed.
 
+(** Like [wp_fptr_of_func_ok] but bridges from [tu.(types)] to
+    [(genv_tu CU).(types)] when [sub_module tu (genv_tu CU)].
+
+    The standard [wp_fptr] goal from [wp_call] uses [(genv_tu CU).(types)]
+    (via the local notation in expr.v), but [code_at_ok] produces
+    [wp_fptr tu.(types) ...].  When [tu ⊧ CU], [sub_module tu (genv_tu CU)]
+    gives [type_table_le tu.(types) (genv_tu CU).(types)], and
+    [wp_fptr_frame_fupd] bridges the gap.
+
+    *)
+Lemma wp_fptr_of_func_ok_compat (tu : translation_unit) (f : Func) (p : ptr)
+    (spec : function_spec) (vs : list ptr) (Q : ptr -> epred)
+    (Hsub : sub_module tu (genv_tu CU)) :
+  code_at tu f p **
+  func_ok tu f spec **
+  spec.(fs_spec) vs Q
+  |-- wp_fptr (genv_tu CU).(types) (type_of_value (Ofunction f)) p vs Q.
+Proof.
+  iIntros "H".
+  iPoseProof (wp_fptr_of_func_ok with "H") as "Hwp".
+  iAssert (∀ v : ptr, Q v -∗ |={⊤}=> Q v)%I as "Hfupd".
+  { iIntros (v) "HQ". iModIntro. iExact "HQ". }
+  iPoseProof (wp_fptr_frame_fupd _ _ _ _ _ _ _ (types_compat _ _ Hsub) with "Hfupd") as "Hconv".
+  iApply ("Hconv" with "Hwp").
+Qed.
+
 (** Resolve [wp_operand (Ecast Cfun2ptr (Eglobal name ty)) Q] from [denoteModule].
 
     Combines [wp_operand_cast_fun2ptr_cpp] (Cfun2ptr cast axiom) +
@@ -590,21 +619,119 @@ End wp_call_lemmas.
     [lookup_lemma]: proof that function is in the symbol table
     [body_proof]: proof that function has a body ([exists body, f_body = Some _])
     [func_ok_lemma]: proof of [|-- func_ok tu f spec]
+    [func_def]: the function definition term (e.g., [ins_func])
 
     After the tactic, the goal is [spec.(fs_spec) vs Q] —
     the caller's precondition for the function being called.
+    All spatial resources are preserved (temporaries, tree, continuation).
+
+    The [change] step replaces the concrete function type in the goal with
+    [type_of_value (Ofunction func_def)] so that [iApply] can resolve evars.
+    Without this, Coq's unifier cannot invert [type_of_value] to find [func_def].
+    The [iSplitL ""] steps provide persistent [code_at] and [func_ok] without
+    consuming spatial resources.
 
     Usage:
 <<
-    wp_call_direct "HMOD" ins_lookup ins_has_body ins_ok.
+    wp_call_direct "HMOD" ins_lookup ins_has_body ins_ok ins_func.
 >>
 *)
-Ltac wp_call_direct HMOD lookup_lemma body_proof func_ok_lemma :=
-  iNext;
+Ltac wp_call_direct HMOD lookup_lemma body_proof func_ok_lemma func_def :=
+  try iNext;
   iPoseProof (code_at_of_denoteModule _ _ _ lookup_lemma body_proof
     with HMOD) as "#_call_ca";
   iPoseProof func_ok_lemma as "#_call_fok";
-  iApply (wp_fptr_of_func_ok with "[$_call_ca $_call_fok]").
+  match goal with |- context[wp_fptr _ ?ft _ _ _] =>
+    change ft with (type_of_value (Ofunction func_def))
+  end;
+  first [
+    iApply (wp_fptr_of_func_ok _ _ _ _ _ _);
+    iSplitR; [iExact "_call_ca"|];
+    iSplitR; [iExact "_call_fok"|]
+  | iApply (wp_fptr_of_func_ok_compat _ _ _ _ _ _ (tu_compat));
+    iSplitR; [iExact "_call_ca"|];
+    iSplitR; [iExact "_call_fok"|]
+  ].
+
+(** Evaluate one [wp_arg] for a primitive type ([Tint], [Tptr], etc.).
+
+    After [nd_seqs] case-splitting identifies which argument to evaluate,
+    the goal shape is [Mbind (wp_arg_body ty e) (fun t => ...) Q] where
+    [wp_arg_body] is the inlined body of the [#[local]] [wp_arg] definition.
+
+    [eval_operand] is a user-supplied tactic that evaluates the operand
+    (e.g., [wp_read_local H v] for a local variable read).
+
+    For primitive types, [wp_arg] unfolds to:
+<<
+      ∀ p, wp_initialize tu ρ ty p e (fun free => K p free)
+>>
+    and [wp_initialize] reduces to [wp_operand] (no destructor overhead).
+
+    Steps:
+    1. Unfold [Mbind] to expose the wp_arg body
+    2. Introduce the temporary pointer [p]
+    3. Unfold [wp_initialize] → [wp_operand]
+    4. [eval_operand] evaluates the operand (user tactic)
+    5. Accept the [tptsto_fuzzyR] wand for the temporary
+    6. Strip fupd if present, unfold [Mmap] to continue *)
+Ltac wp_arg_prim eval_operand :=
+  rewrite /wp.WPE.Mbind /call.wp_arg /=;
+  iIntros (?);
+  rewrite /wp_initialize /qual_norm /=;
+  try rewrite wp_initialize_unqualified.unlock /=;
+  eval_operand;
+  iIntros "?";
+  try iModIntro;
+  rewrite /wp.WPE.Mmap /=.
+
+(** One level of [nd_seqs'] dispatch: case-split on argument position.
+
+    The [nd_seqs'] definition universally quantifies over all ways to split
+    the argument list as [pre ++ q :: post].  This tactic:
+    1. Introduces [pre], [post], [q], and the equality
+    2. Case-splits on [pre] to determine which argument was chosen
+    3. Eliminates impossible cases via [congruence]
+    4. Extracts equalities and substitutes
+    5. Applies [wp_arg_prim] to evaluate the chosen argument
+
+    Handles argument lists up to length 4 (supports up to 4-argument calls).
+    [eval_operand] is the user-supplied operand evaluation tactic. *)
+Ltac wp_nd_args_step eval_operand :=
+  iIntros (? ? ?) "%_nd_eq";
+  match goal with
+  | _nd_eq : _ = ?pre ++ _ :: _ |- _ =>
+    destruct pre as [| ?x0 [| ?x1 [| ?x2 [| ?x3 ?rest]]]];
+      simpl in _nd_eq; try congruence;
+      try (injection _nd_eq; clear _nd_eq; intros; subst);
+      try clear _nd_eq; simpl
+  end;
+  wp_arg_prim eval_operand.
+
+(** Complete [nd_seqs] resolution for a function call.
+
+    Resolves [nd_seqs [wp_arg1; wp_arg2; ...] Q] by recursively applying
+    [wp_nd_args_step] at all levels of the [nd_seqs'] recursion, then
+    handling the base case ([Mret nil]).
+
+    For N arguments, generates N! proof branches (N × (N-1) × ... × 1)
+    corresponding to all evaluation orderings.  Each branch evaluates
+    arguments in a specific order using [eval_operand].
+
+    Usage: pass an Ltac that evaluates any single argument, using [first]
+    to try each hypothesis:
+<<
+    wp_nd_args ltac:(first [
+      wp_read_local "Hpk" vk |
+      wp_read_local "Hpv" vv |
+      wp_read_local "Hpn" vn
+    ]).
+>>
+*)
+Ltac wp_nd_args eval_operand :=
+  rewrite /wp.WPE.nd_seqs /=;
+  repeat (wp_nd_args_step eval_operand);
+  try rewrite /wp.WPE.Mret /=.
 
 (* ================================================================= *)
 (** ** Layer 3: Meta-Tactics *)

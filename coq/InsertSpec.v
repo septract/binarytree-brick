@@ -424,37 +424,63 @@ Proof using MOD MODULE.
         remain.  Instantiate the function pointer. *)
     iExists (_global ins_name).
     iSplit; [iPureIntro; reflexivity |].
-    (** Goal: [nd_seqs [wp_arg "k"; wp_arg "v"; wp_arg "n"] (fun vs free => ...)]
-        where the continuation contains [|> wp_fptr ... (_global ins_name) vs Q'].
-
-        Remaining proof steps (deferred — mechanical but tedious):
-
-        A. [nd_seqs] argument evaluation:
-           [nd_seqs] is universally quantified over all evaluation orderings.
-           For 3 arguments, introduce the ordering split, then for each
-           argument evaluate via [wp_arg] → [wp_read_local] → [tptsto_fuzzyR].
-           Each argument is an [Ecast Cl2r (Evar ...)]: a local variable read.
-
-        B. [wp_fptr] resolution:
-           After argument evaluation, the goal is:
-             [|> wp_fptr source.(types) ft (_global ins_name) [vk;vv;vn] Q']
-           Apply [wp_call_direct "HMOD" ins_lookup ins_has_body ins_ok]
-           to resolve via [code_at] + [func_ok] → [ins_spec.fs_spec vs Q'].
-
-        C. [ins_spec] precondition:
-           Instantiate [ins_spec.fs_spec] with [(k, v, n, t)]:
-           [n |-> treeR 1 t] (from [Htree]).
-
-        D. Post-call continuation:
-           After [ins] returns: [curr_ptr |-> treeR 1 (ins k v t)].
-           - Destruct via [ins_is_node]: [ins k v t = Node c' l' k' v' r']
-           - [wp_unfold_node] to access fields
-           - Write [curr->color = black] (field assignment)
-           - [treeR_node_fold] to reconstruct the tree
-           - Show [Node Black l' k' v' r' = insert k v t]
-             (by [makeBlack_node] + [ins_is_node] + definition of [insert])
-           - Return [curr_ptr]
-           - Clean up locals via [wp_destroy_local] *)
+    (** Resolve all 6 argument evaluation orderings (3! = 6 branches).
+        After [injection; subst], the spec values are [Vint k], [Vint v],
+        [Vptr n] — the original [vk]/[vn]/[vn0] variables were substituted. *)
+    wp_nd_args ltac:(first [
+      wp_read_local "Hpk" (Vint k) |
+      wp_read_local "Hpv" (Vint v) |
+      wp_read_local "Hpn" (Vptr n)
+    ]).
+    (** Resolve function pointer → ins_spec precondition.
+        [wp_call_direct] uses [change] to bridge the function type for
+        unification, then applies [wp_fptr_of_func_ok_compat] and
+        provides persistent [code_at]/[func_ok] without consuming
+        spatial resources.  Remaining goal: [fs_spec ins_spec vs Q]. *)
+    all: wp_call_direct "HMOD" ins_lookup ins_has_body ins_ok ins_func.
+    (** Provide [fs_spec ins_spec] from spatial resources.
+        Phase 1: argument pointer/value pairs from temporaries.
+          The 6 nd_seqs branches have different temporary orderings
+          (e.g. [p; p0; p1] vs [p; p1; p0]), so we match the [vs] list
+          from the goal and provide matching pointer existentials.
+          Value existentials are left as evars and resolved by [iFrame].
+        Phase 2: abstract parameters (k, v, n, t) from tree ownership. *)
+    all: rewrite /ins_spec.
+    all: simpl.
+    (** The 6 nd_seqs branches have different temporary pointer orderings
+        (e.g. [p; p0; p1] vs [p; p1; p0]).  Extract the [vs] list from
+        the goal — the VALUES are always (k, v, n) in spec argument order. *)
+    all: lazymatch goal with
+         | |- context[ @eq (list ptr) _ (?a :: ?b :: ?c :: nil) ] =>
+           iExists a, (Vint k), b, (Vint v), c, (Vptr n)
+         end.
+    all: iSplit; [iPureIntro; reflexivity |].
+    all: iFrame.
+    all: iExists k, v.
+    all: iSplit; [iPureIntro; reflexivity |].
+    (** Post-call: [ins] returns [curr |-> treeR 1 (ins k v t)].
+        Cleanup: [anyR] for 3 arg temporaries + [tptsto_fuzzyR] for recv. *)
+    all: iIntros (curr) "Hins_tree".
+    all: iIntros (recv_ptr) "(Hanyp & Hanyp0 & Hanyp1 & Hrecv)".
+    (** Destroy 3 argument temporaries from [ins] call.
+        Each [destroy_val] for a primitive type reduces to [wp_destroy_prim].
+        [anyR_wp_destroy_prim_val] bridges [anyR ** Q |-- wp_destroy_prim]. *)
+    all: wp_auto.
+    all: rewrite /to_arg_type /=.
+    all: destroy_val_unfold; simpl.
+    all: iApply anyR_wp_destroy_prim_val; [done |].
+    all: cbn -[destroy_val wp_destroy_prim operand_receive]; iFrame "Hanyp1".
+    all: destroy_val_unfold; simpl.
+    all: iApply anyR_wp_destroy_prim_val; [done |].
+    all: cbn -[destroy_val wp_destroy_prim operand_receive]; iFrame "Hanyp0".
+    all: destroy_val_unfold; simpl.
+    all: iApply anyR_wp_destroy_prim_val; [done |].
+    all: cbn -[destroy_val wp_destroy_prim operand_receive]; iFrame "Hanyp".
+    (** All arg temporaries destroyed.  Remaining: operand_receive +
+        [curr->color = black] + [return curr]. *)
+    all: simpl.
+    (* Diagnostic: see goal state after temp destruction *)
+    all: exact I.
 Admitted.
 
 End with_Sigma.
