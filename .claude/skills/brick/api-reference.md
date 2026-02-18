@@ -11,10 +11,13 @@ C++ values are represented as:
 
 ```coq
 Vint (n : Z)         (* integer value *)
-Vbool (b : bool)     (* boolean value *)
+Vbool (b : bool)     (* = Vint (if b then 1 else 0), NOT a separate constructor *)
 Vptr (p : ptr)       (* pointer value *)
 Vnullptr             (* null pointer value *)
 ```
+
+**Gotcha**: `Vbool b` is notation for `Vint (if b then 1 else 0)`.
+`is_true (Vint i) = Some (bool_decide (i ≠ 0))` reduces automatically.
 
 ### C++ Types (`type` / `Rtype`)
 
@@ -93,7 +96,7 @@ refR<ty> q p     := primR (Tref ty) q (Vptr p)
 ```coq
 anyR : Rtype -> cQp.t -> Rep
 (* Asserts some value of the given type exists at the location *)
-(* Useful in preconditions when value doesn't matter *)
+(* Useful in postconditions when old value doesn't matter *)
 ```
 
 ### Pure Assertions
@@ -108,6 +111,36 @@ pureR (Q : mpred)    (* mpred Q as Rep, independent of location *)
 ```coq
 R1 ** R2             (* separating conjunction of two Reps *)
 emp                  (* empty Rep — no resources *)
+```
+
+### Validity / Non-nullness
+
+```coq
+structR cls q        (* struct identity — implies nonnullR, validR, type_ptrR *)
+nonnullR             (* pointer is non-null *)
+validR               (* pointer is valid (strict) *)
+svalidR              (* pointer is strictly valid *)
+type_ptrR ty         (* pointer has type ty *)
+```
+
+**Design rule**: always include `structR cls q` in the Node case of
+recursive rep predicates. It provides `nonnullR` (for null contradictions),
+`validR` (for pointer comparisons), and `reference_to` (for field access).
+
+### Intermediate Storage Predicates
+
+These appear during wp proofs for local variables:
+
+```coq
+tptsto_fuzzyR ty q v    (* fuzzy typed points-to — standard local var form *)
+tptstoR ty q v          (* typed points-to — produced by assignment *)
+initializedR ty q v     (* combines has_type + tptsto — for reading *)
+```
+
+Conversion chain:
+```
+tptstoR  →  tptsto_fuzzyR  →  anyR       (weakening direction)
+primR    ↔  has_type ** tptsto_fuzzyR     (decomposition)
 ```
 
 ## Field Access
@@ -179,9 +212,6 @@ Definition NodeR (q : Qp) (n : NodeModel) : Rep :=
 Use `as_Rep` when you need the `this` pointer (null check, self-reference):
 
 ```coq
-Section treeR.
-Context {A : Type} (R : Qp -> A -> Rep).
-
 Fixpoint treeR (q : Qp) (t : tree A) : Rep :=
   as_Rep (fun this =>
     match t with
@@ -190,20 +220,30 @@ Fixpoint treeR (q : Qp) (t : tree A) : Rep :=
       Exists (lp : ptr) (rp : ptr),
       lp |-> treeR q l **
       rp |-> treeR q r **
-      this |-> (_field _data  |-> R q d **
-                _field _left  |-> ptrR<_Tree> q lp **
-                _field _right |-> ptrR<_Tree> q rp)
-    end
-  ).
-
-End treeR.
+      this |-> (_data  |-> R q d **
+                _left  |-> ptrR<_Tree> q lp **
+                _right |-> ptrR<_Tree> q rp **
+                structR _Tree_name q)   (* <-- required for nonnullR/validR *)
+    end).
 ```
 
 **Key points:**
 - `leaf` = `[| this = nullptr |]` (null pointer, no heap resources)
 - `node` = `Exists` child pointers, separate assertions for:
   - child subtrees (`lp |-> treeR q l`)
-  - current node fields (`this |-> (... ** ... ** ...)`)
+  - current node fields (`this |-> (... ** ... ** structR)`)
+- Always include `structR` — see "Validity / Non-nullness" above
+
+**Characterization lemmas** (always define these):
+```coq
+Lemma treeR_leaf q : treeR q Leaf = as_Rep (fun p => [| p = nullptr |]).
+Proof. reflexivity. Qed.
+
+Lemma treeR_node q c l k v r : treeR q (Node c l k v r) = as_Rep (fun this => ...).
+Proof. reflexivity. Qed.
+```
+Use these instead of `simpl`/`unfold` — direct unfolding interacts badly
+with Iris's proof mode.
 
 ### Combining with Pure Invariants
 
@@ -218,47 +258,38 @@ Definition bstR (q : Qp) (t : tree Z) : Rep :=
 ### cpp_spec Structure
 
 ```coq
-Definition func_spec (this : ptr) :=
-  cpp_spec ReturnType [ArgType1; ArgType2] $
-  \with (ghost_var1 : Type1) (ghost_var2 : Type2)
-  \arg{x} "param_name" (Vint x)
-  \pre  (* precondition: mpred *)
-    this |-> SomeR 1 ghost_var1
-  \post (* postcondition: mpred *)
-    this |-> SomeR 1 (modified ghost_var1).
+Definition func_spec : function_spec :=
+  SFunction (cc:=CC_C) (ar:=Ar_Definite) RetType [ArgType1; ArgType2]
+    (cpp_spec (ar:=Ar_Definite) RetType [ArgType1; ArgType2]
+      (\arg{x} "param_name" (Vint x)
+       \arg{n} "param_name2" (Vptr n)
+       \pre (* precondition: mpred *)
+         ...
+       \post (* postcondition: mpred *)
+         ...)).
 ```
 
 ### Spec Patterns
 
 **Read-only** — use fractional permission `q`, `\prepost` for frame:
 ```coq
-Definition count_spec (this : ptr) :=
-  cpp_spec Tint [] $
-  \with (q : Qp) (t : tree Z)
-  \prepost this |-> treeR (fun q z => uintR q z) q t
-  \post[Vint (count t)] emp.
+\prepost{q t} p |-> myRep q t
+\post{ret}[Vptr ret] [| pure_result |]
 ```
 
-**Mutating** — take full permission `1`:
+**Mutating / ownership transfer** — take full permission `1`, `\pre` + `\post`:
 ```coq
-Definition insert_spec (this : ptr) :=
-  cpp_spec Tbool [Tint] $
-  \with (t : tree Z)
-  \arg{x} "x" (Vint x)
-  \pre this |-> bstR 1 t
-  \post this |-> bstR 1 (insert x t).
+\pre{t} p |-> myRep (cQp.m 1) t
+\post{ret}[Vptr ret] ret |-> myRep (cQp.m 1) (transform t)
 ```
+
+Use ownership transfer when the function may free/reallocate the input.
 
 **With existential postcondition:**
 ```coq
-Definition insert_spec' (this : ptr) :=
-  cpp_spec Tbool [Tint] $
-  \with (t : tree Z)
-  \arg{x} "x" (Vint x)
-  \pre this |-> bstR 1 t
-  \post Exists t',
-    this |-> bstR 1 t' **
-    [| forall y, in_tree y t' <-> (y = x \/ in_tree y t) |].
+\post Exists t',
+  this |-> myRep 1 t' **
+  [| some_relation t t' |]
 ```
 
 ## Fractional Permissions (`Qp` / `cQp.t`)
@@ -267,18 +298,13 @@ Definition insert_spec' (this : ptr) :=
 1                    (* exclusive / full ownership — can read and write *)
 (1/2)                (* half — read-only, can be split/joined *)
 q1 + q2              (* combine two fractional permissions *)
+(cQp.m 1)            (* monomorphic form of 1, used in specs *)
 ```
 
 Rules:
 - `1` = exclusive write access
 - Any `q < 1` = read-only shared access
 - Two halves can be joined: `(1/2) + (1/2) = 1`
-- `primR` with matching type and permission agrees on value:
-
-```coq
-Instance primR_observe_agree ty q1 q2 v1 v2 :
-  Observe2 [| v1 = v2 |] (primR ty q1 v1) (primR ty q2 v2).
-```
 
 ## Key Lemmas
 
@@ -293,7 +319,7 @@ Lemma _at_sep p (P Q : Rep) :
 Lemma _offsetR_offsetR (o1 o2 : offset) R :
   o1 |-> (o2 |-> R) -|- o1 ,, o2 |-> R.
 
-(* as_Rep evaluation *)
+(* as_Rep evaluation — critical for unfold/fold *)
 Lemma _at_as_Rep p (Q : ptr -> mpred) :
   p |-> (as_Rep Q) ⊣⊢ Q p.
 
@@ -310,6 +336,41 @@ Lemma _offsetR_emp o :
   o |-> emp ⊣⊢ emp.
 ```
 
+### Storage Predicate Conversions
+
+```coq
+(* Weaken tptstoR to tptsto_fuzzyR (after assignment) *)
+tptsto_fuzzyR_intro : p |-> tptstoR ty q v |-- p |-> tptsto_fuzzyR ty q v
+
+(* Convert tptsto_fuzzyR to anyR (for cleanup) *)
+anyR_tptsto_fuzzyR_val_2 : tptsto_fuzzyR ty q v -|- anyR ty q
+
+(* Decompose primR into components *)
+_at_primR : p |-> primR ty q v ⊣⊢
+  [| ~~ is_raw v |] ** has_type v ty ** p |-> tptsto_fuzzyR ty q v
+```
+
+### Observe Instances
+
+```coq
+(* reference_to from structR — for field access *)
+structR_reference_to cls q p :
+  Observe (reference_to (Tnamed cls) p) (p |-> structR cls q)
+
+(* nonnullR from structR — for null contradictions *)
+structR_nonnullR : Observe (p |-> nonnullR) (p |-> structR cls q)
+
+(* validR from structR — for pointer comparisons *)
+structR_validR : Observe (p |-> validR) (p |-> structR cls q)
+
+(* has_type from primR — for eval_binop *)
+primR_observe_has_type_prop :
+  Observe [| has_type_prop v ty |] (p |-> primR ty q v)
+
+(* has_type_or_undef from tptsto_fuzzyR — for reading locals *)
+(* available via observe instance *)
+```
+
 ## Proof Tactics
 
 ### Iris Proof Mode (IPM)
@@ -323,29 +384,54 @@ iExists v1, v2.               (* provide existential witnesses *)
 iFrame.                        (* frame matching resources *)
 iFrame "H1".                   (* frame specific hypothesis *)
 iSplit.                        (* split persistent/pure conjunction *)
+iSplitL "H1 H2".              (* split sep conj, left gets named hyps *)
+iSplitR "H3".                 (* split sep conj, right gets named hyps *)
 iPureIntro.                    (* switch to pure Coq goal *)
 iApply "H".                    (* apply hypothesis *)
+iRevert "H".                   (* move hypothesis back to goal *)
+iClear "H".                    (* discard hypothesis *)
+iModIntro.                     (* strip fancy update modality *)
+iNext.                         (* strip later modality *)
 done.                          (* close trivial goal *)
 ```
 
-### wp Tactics (Weakest Precondition)
+### Observe Pattern (Non-destructive Fact Extraction)
 
 ```coq
-wp_call.                       (* step through function call *)
-wp_if.                         (* step through if/else branch *)
-wp_while inv.                  (* while loop with loop invariant *)
-wp_field.                      (* field access *)
-wp_alloc p as "Hp".            (* allocate, bind pointer to p *)
-wp_free.                       (* free allocation *)
-wp_load.                       (* load from memory *)
-wp_store.                      (* store to memory *)
+(* Extract persistent fact without consuming resource *)
+iDestruct (observe (reference_to _ _) with "H") as "#Href".
+iDestruct (observe (has_type_or_undef v ty) with "H") as "#Hty".
+iDestruct (observe (p |-> nonnullR) with "Hstruct") as "#Hnn".
+iDestruct (observe (p |-> validR) with "Hstruct") as "#Hv".
+iDestruct (observe ([| has_type_prop (Vint x) Tint |]) with "H") as "%Htp".
 ```
 
-### Observe Pattern (Extract Pure Facts)
+`#` prefix = persistent (survives iSplitL/iSplitR).
+`%` prefix = pure Coq fact (moves to Coq context).
+
+### wp Tactics (Weakest Precondition)
+
+See [wp-proof-guide.md](wp-proof-guide.md) for the full proof architecture.
 
 ```coq
-(* Extract agreement from two fractional resources *)
-iDestruct (observe_2 [| v1 = v2 |] with "R1 R2") as %Heq.
+(* Statement-level *)
+iApply wp_seq.                 (* step through sequence *)
+iApply wp_break.               (* break from loop *)
+iApply wp_return.              (* return statement *)
+iApply wp_expr.                (* expression statement *)
+iApply (wp_if tu).             (* if/else branch *)
+iApply (wp_while_inv tu Inv).  (* while loop with invariant *)
+
+(* Expression-level *)
+iApply wp_operand_call.        (* function call *)
+iApply (wp_operand_binop tu).  (* binary operator *)
+iApply wp_operand_cast_l2r.    (* lvalue-to-rvalue cast *)
+iApply wp_operand_cast_null.   (* nullptr literal *)
+iApply wp_null.                (* null value *)
+iApply wp_lval_var.            (* variable lookup *)
+iApply wp_lval_member.         (* field member access *)
+iApply wp_lval_assign.         (* assignment *)
+iApply wp_func_intro.          (* enter function body *)
 ```
 
 ## cpp2v Integration
