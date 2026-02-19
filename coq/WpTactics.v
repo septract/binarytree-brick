@@ -30,6 +30,9 @@
     - [wp_struct_field H_struct H_field v] — Observe + offset + provide value.
     - [wp_assign_local H_local] — L-value target of [local = rhs].
     - [wp_assign_member_field H_local v H_struct H_field] — L-value target of [ptr->field = rhs].
+    - [wp_destroy_prim_temp H] — Destroy one primitive-typed argument temporary.
+    - [wp_operand_receive v H_recv H_local] — Receive function return value into local.
+    - [wp_assign_setup] — Assignment preamble: [wp_lval_assign] + [eval2] unfold.
     - [wp_eval_int_binop H_hty eval_lemma] — Prove [eval_binop] for integer binary ops.
     - [wp_eval_int_lt H_hty] — Alias: [wp_eval_int_binop H_hty eval_lt].
     - [wp_eval_ptr_neq_null tu cls] — Prove [nullptr != nullptr] evaluates to false.
@@ -402,6 +405,86 @@ Ltac wp_assign_member_field H_local v H_struct H_field :=
   rewrite /read_decl /=;
   wp_observe_ref H_field;
   iSplitL H_field; [iRevert H_field; rewrite primR_anyR; iIntros "$" |].
+
+(** Destroy one primitive-typed argument temporary.
+
+    After a function call, the caller receives [anyR] hypotheses for each
+    argument temporary.  The BRiCk wp goal contains [destroy_val] (or the
+    already-unfolded [wp_destroy_prim]) for each.  This tactic destroys
+    one temporary by:
+    1. Unfolding [destroy_val] (idempotent via [try])
+    2. Bridging [anyR] to [wp_destroy_prim] via [anyR_wp_destroy_prim_val]
+    3. Framing the [anyR] hypothesis
+
+    [H] names the [anyR] hypothesis for the temporary being destroyed.
+
+    The [try] guard on [destroy_val_unfold] handles the case where a
+    previous invocation's [!] rewrite already unfolded all same-typed
+    [destroy_val]s.
+
+    Usage:
+<<
+    wp_destroy_prim_temp "Hanyp1".
+    wp_destroy_prim_temp "Hanyp0".
+    wp_destroy_prim_temp "Hanyp".
+>>
+*)
+Ltac wp_destroy_prim_temp H :=
+  try (destroy_val_unfold; simpl);
+  iApply anyR_wp_destroy_prim_val; [done |];
+  try (cbn -[destroy_val wp_destroy_prim operand_receive]);
+  iFrame H.
+
+(** Receive a function return value into a local variable.
+
+    After function call + argument temp destruction, the wp goal contains
+    [operand_receive] which stores the callee's return value into a local.
+    This tactic:
+    1. Strips the fupd modality
+    2. Unlocks [operand_receive]
+    3. Provides the return value [v]
+    4. Frames the receiver hypothesis [H_recv] (the [tptsto_fuzzyR] wand)
+    5. Introduces the resulting local variable hypothesis as [H_local]
+
+    [v] is the return value (e.g. [Vptr curr]).
+    [H_recv] names the [tptsto_fuzzyR] receiver hypothesis from the call.
+    [H_local] is the name to give the new local variable hypothesis.
+
+    Usage:
+<<
+    wp_operand_receive (Vptr curr) "Hrecv" "Hcurr_local".
+>>
+*)
+Ltac wp_operand_receive v H_recv H_local :=
+  iModIntro;
+  rewrite operand_receive.unlock /=;
+  iExists v; iFrame H_recv;
+  iIntros H_local.
+
+(** Assignment setup: apply [wp_lval_assign] and unfold [eval2].
+
+    Every assignment [lhs = rhs] in a wp proof starts with [wp_lval_assign]
+    followed by unfolding the evaluation order monad.  This tactic handles
+    both lr (default) and rl (C++17) evaluation orders:
+    1. Apply [wp_lval_assign]
+    2. Simplify (handles lr order automatically)
+    3. Try unfolding [eval2]/[Mmap]/[Mseq]/[Mbind] (needed for rl order)
+
+    After the tactic, the goal is the first operand to evaluate (RHS for
+    rl order, LHS for lr order).
+
+    Usage:
+<<
+    wp_assign_setup.
+    (* RHS evaluation *)
+    (* LHS evaluation *)
+    iIntros "H_new".  (* receive updated value *)
+>>
+*)
+Ltac wp_assign_setup :=
+  iApply wp_lval_assign;
+  rewrite /=;
+  try rewrite /eval2 /wp.WPE.Mmap /wp.WPE.Mseq /wp.WPE.Mbind /=.
 
 (** Prove [eval_binop] for an integer binary operation.
 
@@ -882,6 +965,10 @@ Ltac wp_nd_args eval_operand :=
     because they are part of larger sequences (wp_read_local, field access)
     and would interfere if auto-fired.
 
+    Universal quantifier introduction ([iIntros (?)]) is NOT included
+    because proofs often need named variables for loop invariants and
+    other Coq-level terms.  Call [iIntros (name)] explicitly.
+
     Modalities are last because they appear between every other step —
     if tried first, they'd mask the actual wp rule that should fire.
     But wp rules only apply when modalities have been stripped. The
@@ -901,6 +988,7 @@ Ltac wp_step :=
     progress (rewrite wp_decls_eq /wp_decls_def /=) |
     progress (rewrite /wp_initialize /qual_norm /=) |
     progress (rewrite wp_initialize_unqualified.unlock /=) |
+    progress (rewrite /to_arg_type /=) |
     (* 3. Expression-level rules *)
     progress (rewrite /wp_discard /=) |
     wp_null_val |

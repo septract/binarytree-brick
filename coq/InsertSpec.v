@@ -412,11 +412,10 @@ Proof using MOD MODULE.
     subst vals. simpl.
     iDestruct "Hspec" as (k v n t) "(%Hargs & Htree & Hcont)".
     injection Hargs as -> ->. subst.
-    (** wp_auto through Sseq → Sdecl → wp_initialize scaffolding. *)
+    (** wp_auto through Sseq → Sdecl → wp_initialize → ∀ addr. *)
     wp_auto.
-    (** At [∀ addr, wp_operand ... (Ecall ...) Q]. Introduce addr and
-        apply the Ecall rule to get [wp_call]. *)
     iIntros (addr).
+    (** At [wp_operand ... (Ecall ...) Q].  Apply the Ecall rule. *)
     iApply wp_operand_call.
     rewrite /wp_call /=.
     (** Discharge [source ⊧ σ] from MOD. *)
@@ -472,32 +471,15 @@ Proof using MOD MODULE.
         Cleanup: [anyR] for 3 arg temporaries + [tptsto_fuzzyR] for recv. *)
     all: iIntros (curr) "Hins_tree".
     all: iIntros (recv_ptr) "(Hanyp & Hanyp0 & Hanyp1 & Hrecv)".
-    (** Destroy 3 argument temporaries from [ins] call.
-        Each [destroy_val] for a primitive type reduces to [wp_destroy_prim].
-        [anyR_wp_destroy_prim_val] bridges [anyR ** Q |-- wp_destroy_prim]. *)
+    (** Destroy 3 argument temporaries from [ins] call. *)
     all: wp_auto.
-    all: rewrite /to_arg_type /=.
-    all: destroy_val_unfold; simpl.
-    all: iApply anyR_wp_destroy_prim_val; [done |].
-    all: cbn -[destroy_val wp_destroy_prim operand_receive]; iFrame "Hanyp1".
-    all: destroy_val_unfold; simpl.
-    all: iApply anyR_wp_destroy_prim_val; [done |].
-    all: cbn -[destroy_val wp_destroy_prim operand_receive]; iFrame "Hanyp0".
-    (** Third temp: already [wp_destroy_prim] (not [destroy_val]) because
-        [destroy_val_unfold] used [!] which rewrote both [int]-typed
-        [destroy_val]s in the second cycle. Skip [destroy_val_unfold]. *)
-    all: iApply anyR_wp_destroy_prim_val; [done |].
-    all: iFrame "Hanyp".
-    (** All arg temporaries destroyed.  Strip fupd, then resolve
-        [operand_receive]: store [ins] return value into local [curr]. *)
-    all: iModIntro.
-    all: rewrite operand_receive.unlock /=.
-    all: iExists (Vptr curr); iFrame "Hrecv".
-    (** [operand_receive] provided [addr |-> tptsto_fuzzyR "Node*" 1$m (Vptr curr)]
-        to the continuation wand.  Introduce it as [Hcurr_local]. *)
-    all: iIntros "Hcurr_local".
+    all: wp_destroy_prim_temp "Hanyp1".
+    all: wp_destroy_prim_temp "Hanyp0".
+    all: wp_destroy_prim_temp "Hanyp".
+    (** Receive [ins] return value into local [curr]. *)
+    all: wp_operand_receive (Vptr curr) "Hrecv" "Hcurr_local".
     (** Strip accumulated fupd/later modalities to reach the wp. *)
-    all: repeat (first [iModIntro | iNext]).
+    all: wp_auto.
     (** Step 4: Destruct [ins k v t] — always a Node by [ins_is_node].
         Needed to unfold [treeR] for field-level access. *)
     all: destruct (ins_is_node k v t) as [c' [l' [k' [v' [r' Hins_eq]]]]].
@@ -510,29 +492,8 @@ Proof using MOD MODULE.
     all: wp_auto.
     (** Step 6: Assignment [curr->color = black].
         C++17 rl order: evaluate RHS ([Node::black] = false) first,
-        then LHS ([curr->color] address), then write.
-
-        After the assignment, the color field is updated:
-          [_ncolor : curr |-> _color |-> tptstoR "bool" 1$m (Vbool false)]
-        All other fields unchanged. No temporaries created (global const read
-        + member l-value don't create temps, so [interp source id] is trivial).
-
-        Phase 5B TODO: Fill in the wp_lval_assign mechanics:
-          1. Unfold Mmap/Mseq to sequential evaluation
-          2. RHS: wp_operand (Ecast Cl2r (Eglobal "Node::black" "const bool"))
-             → resolve global via denoteModule → Dvariable → Vbool false
-          3. LHS: wp_lval (Emember ... "color" ...)
-             → wp_lval_member → read_arrow (read curr local) → field offset
-          4. Pre: provide [anyR "bool" 1$m] from [_ncolor]
-          5. Post: consume [tptstoR "bool" 1$m (Vbool false)] *)
-    all: iApply wp_lval_assign.
-    (** Step 6a: Unfold [eval2] for C++17 rl order (RHS first, then LHS).
-        [eval2 rl] = [Mmap swap (Mseq rhs lhs)].  Unfold the monadic
-        wrappers to expose [wp_operand] for the RHS at the top level. *)
-    (** Step 6a: Unfold [eval2] for C++17 rl order (RHS first, then LHS).
-        [eval2 rl] = [Mmap swap (Mseq rhs lhs)].  Unfold the monadic
-        wrappers to expose [wp_operand] for the RHS at the top level. *)
-    all: rewrite /= /eval2 /wp.WPE.Mmap /wp.WPE.Mseq /wp.WPE.Mbind /=.
+        then LHS ([curr->color] address), then write. *)
+    all: wp_assign_setup.
     (** Step 6b: RHS — evaluate [Node::black] (global const → [Vbool false]).
         Uses [wp_read_global_const] (Admitted lemma) since BRiCk's
         [initSymbol] doesn't support static initialization yet. *)
@@ -561,13 +522,12 @@ Proof using MOD MODULE.
     all: iRevert "Htree".
     all: rewrite /RBTree.insert Hins_eq makeBlack_node.
     all: iIntros "Htree".
-    (** Step 9: Return path.
-        After [wp_auto], goal is [∀ p, wp_operand ... (return expr) ...].
-        The [∀ p] is from [wp_initialize] for the return value. *)
-    all: repeat wp_step.
+    (** Step 9: Return path.  [wp_auto] steps through [Sreturn] →
+        [wp_initialize] to reach [∀ p, wp_operand ...].
+        Introduce the universal quantifier explicitly, then read [curr]. *)
+    all: wp_auto.
     all: iIntros (?).
-    (** Now goal is [wp_operand _ _ (Ecast Cl2r (Evar "curr" _)) Q].
-        Read the local variable [curr] to get [Vptr curr]. *)
+    (** Read the local variable [curr] to get [Vptr curr]. *)
     all: wp_read_local "Hcurr_local" (Vptr curr).
     (** After reading [curr], a wand remains (from return initialization).
         Introduce its premise and continue stepping. *)
