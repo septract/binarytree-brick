@@ -46,6 +46,7 @@
     - [wp_operand_cfun2ptr_global] — Resolve [Ecast Cfun2ptr (Eglobal name ty)] (Admitted: BRiCk gap).
     - [wp_operand_read_global_const] — Resolve [Ecast Cl2r (Eglobal name qty)] for const globals (Admitted: BRiCk gap).
     - [wp_read_global_const HMOD lookup v] — Read a global const variable.
+    - [wp_resolve_call HMOD lookup body fname] — Resolve [Ecall] through [cfun2ptr_global] to [wp_fptr].
     - [wp_call_direct HMOD lookup body func_ok] — One-liner for call sites.
     - [wp_arg_prim eval_operand] — Evaluate one [wp_arg] for a primitive type.
     - [wp_nd_args_step eval_operand] — One level of [nd_seqs'] dispatch.
@@ -819,6 +820,37 @@ End wp_call_lemmas.
 Ltac wp_read_global_const HMOD lookup_lemma v :=
   rewrite -(wp_operand_read_global_const _ _ _ _ _ v _ lookup_lemma);
   iSplitL HMOD; [iExact HMOD |].
+
+(** Resolve [wp_operand ... (Ecall (Ecast Cfun2ptr (Eglobal name ty)) args) Q].
+
+    Handles the mechanical prefix of every function call in a wp proof:
+    1. Apply [wp_operand_call] (Ecall rule)
+    2. Unfold [wp_call], discharge [tu ⊧ σ], unfold [Mbind/Mmap]
+    3. Resolve the function expression via [wp_operand_cfun2ptr_global]
+    4. Frame [denoteModule] from [HMOD] and instantiate function pointer
+
+    After the tactic, the goal is at the [nd_seqs] level —
+    ready for [wp_nd_args] to evaluate arguments.
+
+    [HMOD] names the persistent hypothesis holding [denoteModule tu].
+    [lookup_lemma] proves [tu.(symbols) !! fname = Some (Ofunction _)].
+    [body_proof] proves [exists body, f_body = Some body].
+    [fname] is the function's [obj_name] (e.g. [ins_name]).
+
+    Usage:
+<<
+    wp_resolve_call "HMOD" ins_lookup ins_has_body ins_name.
+>>
+*)
+Ltac wp_resolve_call HMOD lookup_lemma body_proof fname :=
+  iApply wp_operand_call;
+  rewrite /wp_call /=;
+  iIntros "%_";
+  rewrite /wp.WPE.Mbind /wp.WPE.Mmap /=;
+  iApply (wp_operand_cfun2ptr_global _ _ _ _ _ _ lookup_lemma body_proof);
+  iSplitL HMOD; [iExact HMOD |];
+  iExists (_global fname);
+  iSplit; [iPureIntro; reflexivity |].
 
 (** Resolve a [wp_fptr] goal from [denoteModule] + [func_ok].
 

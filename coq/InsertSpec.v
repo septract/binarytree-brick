@@ -412,128 +412,65 @@ Proof using MOD MODULE.
     subst vals. simpl.
     iDestruct "Hspec" as (k v n t) "(%Hargs & Htree & Hcont)".
     injection Hargs as -> ->. subst.
-    (** wp_auto through Sseq → Sdecl → wp_initialize → ∀ addr. *)
-    wp_auto.
-    iIntros (addr).
-    (** At [wp_operand ... (Ecall ...) Q].  Apply the Ecall rule. *)
-    iApply wp_operand_call.
-    rewrite /wp_call /=.
-    (** Discharge [source ⊧ σ] from MOD. *)
-    iIntros "%_".
-    (** Unfold [Mbind] to expose [wp_operand] for function expression. *)
-    rewrite /wp.WPE.Mbind /wp.WPE.Mmap /=.
-    (** Resolve function expression: [Ecast Cfun2ptr (Eglobal ins_name t6062)].
-        Uses [wp_operand_cfun2ptr_global] which bridges the BRiCk alignment
-        gap for function types.  After this, the continuation is instantiated
-        at [Vptr (_global ins_name)] and we have [denoteModule] in scope. *)
-    iApply (wp_operand_cfun2ptr_global _ _ _ _ _ _ ins_lookup ins_has_body).
-    iSplitL "HMOD"; [iExact "HMOD" |].
-    (** Goal: continuation with [Vptr (_global ins_name)].
-        The existential for [fp] and the [nd_seqs] argument evaluation
-        remain.  Instantiate the function pointer. *)
-    iExists (_global ins_name).
-    iSplit; [iPureIntro; reflexivity |].
-    (** Resolve all 6 argument evaluation orderings (3! = 6 branches).
-        After [injection; subst], the spec values are [Vint k], [Vint v],
-        [Vptr n] — the original [vk]/[vn]/[vn0] variables were substituted. *)
+    (** Step 1: wp through Sseq → Sdecl → wp_initialize → ∀ addr. *)
+    wp_auto. iIntros (addr).
+    (** Step 2: Resolve [ins(k, v, n)] call.
+        [wp_resolve_call] handles: Ecall rule → cfun2ptr → function pointer.
+        [wp_nd_args] resolves all 6 argument evaluation orderings (3! = 6).
+        [wp_call_direct] composes [code_at] + [func_ok] → [wp_fptr]. *)
+    wp_resolve_call "HMOD" ins_lookup ins_has_body ins_name.
     wp_nd_args ltac:(first [
       wp_read_local "Hpk" (Vint k) |
       wp_read_local "Hpv" (Vint v) |
       wp_read_local "Hpn" (Vptr n)
     ]).
-    (** Resolve function pointer → ins_spec precondition.
-        [wp_call_direct] uses [change] to bridge the function type for
-        unification, then applies [wp_fptr_of_func_ok_compat] and
-        provides persistent [code_at]/[func_ok] without consuming
-        spatial resources.  Remaining goal: [fs_spec ins_spec vs Q]. *)
     all: wp_call_direct "HMOD" ins_lookup ins_has_body ins_ok ins_func.
-    (** Provide [fs_spec ins_spec] from spatial resources.
-        Phase 1: argument pointer/value pairs from temporaries.
-          The 6 nd_seqs branches have different temporary orderings
-          (e.g. [p; p0; p1] vs [p; p1; p0]), so we match the [vs] list
-          from the goal and provide matching pointer existentials.
-          Value existentials are left as evars and resolved by [iFrame].
-        Phase 2: abstract parameters (k, v, n, t) from tree ownership. *)
-    all: rewrite /ins_spec.
-    all: simpl.
-    (** The 6 nd_seqs branches have different temporary pointer orderings
-        (e.g. [p; p0; p1] vs [p; p1; p0]).  Extract the [vs] list from
-        the goal — the VALUES are always (k, v, n) in spec argument order. *)
-    all: lazymatch goal with
+    (** Step 3: Provide [ins_spec] precondition.
+        The 6 branches differ only in temporary pointer ordering;
+        [lazymatch] extracts the pointers, [iFrame] resolves values. *)
+    all: rewrite /ins_spec; simpl;
+         lazymatch goal with
          | |- context[ @eq (list ptr) _ (?a :: ?b :: ?c :: nil) ] =>
            iExists a, (Vint k), b, (Vint v), c, (Vptr n)
-         end.
-    all: iSplit; [iPureIntro; reflexivity |].
-    all: iFrame.
-    all: iExists k, v.
-    all: iSplit; [iPureIntro; reflexivity |].
-    (** Post-call: [ins] returns [curr |-> treeR 1 (ins k v t)].
-        Cleanup: [anyR] for 3 arg temporaries + [tptsto_fuzzyR] for recv. *)
-    all: iIntros (curr) "Hins_tree".
-    all: iIntros (recv_ptr) "(Hanyp & Hanyp0 & Hanyp1 & Hrecv)".
-    (** Destroy 3 argument temporaries from [ins] call. *)
-    all: wp_auto.
-    all: wp_destroy_prim_temp "Hanyp1".
-    all: wp_destroy_prim_temp "Hanyp0".
-    all: wp_destroy_prim_temp "Hanyp".
-    (** Receive [ins] return value into local [curr]. *)
-    all: wp_operand_receive (Vptr curr) "Hrecv" "Hcurr_local".
-    (** Strip accumulated fupd/later modalities to reach the wp. *)
-    all: wp_auto.
-    (** Step 4: Destruct [ins k v t] — always a Node by [ins_is_node].
-        Needed to unfold [treeR] for field-level access. *)
-    all: destruct (ins_is_node k v t) as [c' [l' [k' [v' [r' Hins_eq]]]]].
-    (** Step 5: Rewrite [Hins_tree] with [ins_is_node] equation, then
-        unfold [treeR] to access individual fields.
-        [iRevert] moves it to the goal so [rewrite] can reach it. *)
-    all: iRevert "Hins_tree"; rewrite Hins_eq; iIntros "Hins_tree".
-    all: wp_unfold_node "Hins_tree".
-    (** Step 6: wp through [Sexpr] → assignment [curr->color = black]. *)
-    all: wp_auto.
+         end;
+         iSplit; [iPureIntro; reflexivity |];
+         iFrame;
+         iExists k, v;
+         iSplit; [iPureIntro; reflexivity |].
+    (** Step 4: Post-call cleanup.
+        Destroy 3 arg temporaries, receive return value into [curr]. *)
+    all: iIntros (curr) "Hins_tree";
+         iIntros (recv_ptr) "(Hanyp & Hanyp0 & Hanyp1 & Hrecv)";
+         wp_auto;
+         wp_destroy_prim_temp "Hanyp1";
+         wp_destroy_prim_temp "Hanyp0";
+         wp_destroy_prim_temp "Hanyp";
+         wp_operand_receive (Vptr curr) "Hrecv" "Hcurr_local";
+         wp_auto.
+    (** Step 5: Destruct [ins k v t] (always a Node by [ins_is_node]),
+        then unfold [treeR] to access individual fields. *)
+    all: destruct (ins_is_node k v t) as [c' [l' [k' [v' [r' Hins_eq]]]]];
+         iRevert "Hins_tree"; rewrite Hins_eq; iIntros "Hins_tree";
+         wp_unfold_node "Hins_tree".
     (** Step 6: Assignment [curr->color = black].
-        C++17 rl order: evaluate RHS ([Node::black] = false) first,
-        then LHS ([curr->color] address), then write. *)
-    all: wp_assign_setup.
-    (** Step 6b: RHS — evaluate [Node::black] (global const → [Vbool false]).
-        Uses [wp_read_global_const] (Admitted lemma) since BRiCk's
-        [initSymbol] doesn't support static initialization yet. *)
-    all: wp_read_global_const "HMOD" black_lookup (Vbool false).
-    (** Step 6c: LHS — evaluate [curr->color] address.
-        Chain: [wp_lval_member] → [read_arrow] → read [curr] local →
-        [reference_to] from struct → [read_decl] → field offset.
-        Must [wp_offset] the color field first to convert from nested
-        to offset form for [wp_observe_ref]. *)
-    all: wp_offset "_ncolor".
-    all: wp_assign_member_field "Hcurr_local" (Vptr curr) "_nstruct" "_ncolor".
-    (** Step 6d: Post-assign — receive the updated color field.
-        [wp_lval_assign] yields [tptstoR "bool" 1$m (Vbool false)]. *)
-    all: iIntros "_ncolor_new".
-    (** Step 6e: Strip [interp] (no temporaries) + modalities. *)
-    all: wp_auto.
-    (** Step 7: Fold [treeR] back with updated color = Black.
-        Convert [tptstoR] → [primR] (since [Vbool false] is not raw/undef),
-        revert the color field offset, then fold via [treeR_node_fold].
-        Must use [iAssert] since the goal is a [wp_stmt], not [treeR]. *)
-    all: iPoseProof (tptstoR_to_primR _ _ _ (Vbool false) I with "_ncolor_new") as "_ncolor".
-    all: wp_revert_offset "_ncolor".
-    all: iPoseProof (treeR_node_fold _ Black l' k' v' r' _lp _rp _rc curr
+        C++17 rl order: RHS first, then LHS, then write. *)
+    all: wp_auto; wp_assign_setup;
+         wp_read_global_const "HMOD" black_lookup (Vbool false);
+         wp_offset "_ncolor";
+         wp_assign_member_field "Hcurr_local" (Vptr curr) "_nstruct" "_ncolor";
+         iIntros "_ncolor_new"; wp_auto.
+    (** Step 7: Fold [treeR] back with color = Black.
+        Convert [tptstoR] → [primR], revert offset, fold via [treeR_node_fold]. *)
+    all: iPoseProof (tptstoR_to_primR _ _ _ (Vbool false) I with "_ncolor_new") as "_ncolor";
+         wp_revert_offset "_ncolor";
+         iPoseProof (treeR_node_fold _ Black l' k' v' r' _lp _rp _rc curr
            with "[$_ntl $_ntr $_nrc $_ncolor $_nkey $_nval $_nleft $_nright $_nstruct]") as "Htree".
-    (** Step 8: Semantic equivalence — [Node Black l' k' v' r' = insert k v t]. *)
-    all: iRevert "Htree".
-    all: rewrite /RBTree.insert Hins_eq makeBlack_node.
-    all: iIntros "Htree".
-    (** Step 9: Return path.  [wp_auto] steps through [Sreturn] →
-        [wp_initialize] to reach [∀ p, wp_operand ...].
-        Introduce the universal quantifier explicitly, then read [curr]. *)
-    all: wp_auto.
-    all: iIntros (?).
-    (** Read the local variable [curr] to get [Vptr curr]. *)
-    all: wp_read_local "Hcurr_local" (Vptr curr).
-    (** After reading [curr], a wand remains (from return initialization).
-        Introduce its premise and continue stepping. *)
-    all: iIntros "?".
-    all: repeat wp_step.
-    (** Step 10: Remaining goal is the return cleanup + postcondition.
+    (** Step 8: Semantic equivalence + return [curr]. *)
+    all: iRevert "Htree"; rewrite /RBTree.insert Hins_eq makeBlack_node; iIntros "Htree";
+         wp_auto; iIntros (?);
+         wp_read_local "Hcurr_local" (Vptr curr);
+         iIntros "?"; repeat wp_step.
+    (** Step 10: Return cleanup + postcondition.
         TODO: destroy [curr] local, provide [Hcont] with [Htree]. *)
     all: admit.
 Admitted.
