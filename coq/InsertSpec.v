@@ -1,5 +1,6 @@
 (** * Insert Specification and Proof — Phase 5A
     Created: 2026-02-17
+    Updated: 2026-02-18 — Complete [insert_ok] proof (assignment + return).
 
     Proves that the C++ [Node::insert] (and helper [Node::ins],
     [Node::setRebalanceLeft], [Node::setRebalanceRight], [Node::makeCopy])
@@ -209,6 +210,15 @@ Definition setRebalanceRight_func : Func :=
 Lemma setRebalanceRight_lookup :
   source.(symbols) !! setRebalanceRight_name =
     Some (Ofunction setRebalanceRight_func).
+Proof. native_compute. reflexivity. Qed.
+
+(** ** Node::black (global const) *)
+
+Definition black_name : obj_name := Nscoped _Node_name (Nid "black").
+
+Lemma black_lookup :
+  source.(symbols) !! black_name =
+    Some (Ovar (Qconst Tbool) (global_init.Init (Ebool false))).
 Proof. native_compute. reflexivity. Qed.
 
 (* ================================================================= *)
@@ -516,7 +526,55 @@ Proof using MOD MODULE.
           4. Pre: provide [anyR "bool" 1$m] from [_ncolor]
           5. Post: consume [tptstoR "bool" 1$m (Vbool false)] *)
     all: iApply wp_lval_assign.
-    all: rewrite /=.
+    (** Step 6a: Unfold [eval2] for C++17 rl order (RHS first, then LHS).
+        [eval2 rl] = [Mmap swap (Mseq rhs lhs)].  Unfold the monadic
+        wrappers to expose [wp_operand] for the RHS at the top level. *)
+    (** Step 6a: Unfold [eval2] for C++17 rl order (RHS first, then LHS).
+        [eval2 rl] = [Mmap swap (Mseq rhs lhs)].  Unfold the monadic
+        wrappers to expose [wp_operand] for the RHS at the top level. *)
+    all: rewrite /= /eval2 /wp.WPE.Mmap /wp.WPE.Mseq /wp.WPE.Mbind /=.
+    (** Step 6b: RHS — evaluate [Node::black] (global const → [Vbool false]).
+        Uses [wp_read_global_const] (Admitted lemma) since BRiCk's
+        [initSymbol] doesn't support static initialization yet. *)
+    all: wp_read_global_const "HMOD" black_lookup (Vbool false).
+    (** Step 6c: LHS — evaluate [curr->color] address.
+        Chain: [wp_lval_member] → [read_arrow] → read [curr] local →
+        [reference_to] from struct → [read_decl] → field offset.
+        Must [wp_offset] the color field first to convert from nested
+        to offset form for [wp_observe_ref]. *)
+    all: wp_offset "_ncolor".
+    all: wp_assign_member_field "Hcurr_local" (Vptr curr) "_nstruct" "_ncolor".
+    (** Step 6d: Post-assign — receive the updated color field.
+        [wp_lval_assign] yields [tptstoR "bool" 1$m (Vbool false)]. *)
+    all: iIntros "_ncolor_new".
+    (** Step 6e: Strip [interp] (no temporaries) + modalities. *)
+    all: wp_auto.
+    (** Step 7: Fold [treeR] back with updated color = Black.
+        Convert [tptstoR] → [primR] (since [Vbool false] is not raw/undef),
+        revert the color field offset, then fold via [treeR_node_fold].
+        Must use [iAssert] since the goal is a [wp_stmt], not [treeR]. *)
+    all: iPoseProof (tptstoR_to_primR _ _ _ (Vbool false) I with "_ncolor_new") as "_ncolor".
+    all: wp_revert_offset "_ncolor".
+    all: iPoseProof (treeR_node_fold _ Black l' k' v' r' _lp _rp _rc curr
+           with "[$_ntl $_ntr $_nrc $_ncolor $_nkey $_nval $_nleft $_nright $_nstruct]") as "Htree".
+    (** Step 8: Semantic equivalence — [Node Black l' k' v' r' = insert k v t]. *)
+    all: iRevert "Htree".
+    all: rewrite /RBTree.insert Hins_eq makeBlack_node.
+    all: iIntros "Htree".
+    (** Step 9: Return path.
+        After [wp_auto], goal is [∀ p, wp_operand ... (return expr) ...].
+        The [∀ p] is from [wp_initialize] for the return value. *)
+    all: repeat wp_step.
+    all: iIntros (?).
+    (** Now goal is [wp_operand _ _ (Ecast Cl2r (Evar "curr" _)) Q].
+        Read the local variable [curr] to get [Vptr curr]. *)
+    all: wp_read_local "Hcurr_local" (Vptr curr).
+    (** After reading [curr], a wand remains (from return initialization).
+        Introduce its premise and continue stepping. *)
+    all: iIntros "?".
+    all: repeat wp_step.
+    (** Step 10: Remaining goal is the return cleanup + postcondition.
+        TODO: destroy [curr] local, provide [Hcont] with [Htree]. *)
     all: admit.
 Admitted.
 

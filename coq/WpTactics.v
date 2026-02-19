@@ -12,6 +12,7 @@
     - [at_offsetR_intro] — Forward direction of [_at_offsetR].
     - [at_primR_intro] — Decompose [primR] into components.
     - [tptstoR_to_fuzzyR] — Weaken [tptstoR] to [tptsto_fuzzyR].
+    - [tptstoR_to_primR] — Convert [tptstoR] back to [primR] (non-raw/undef values).
 
     == Layer 1: Atomic Tactics ==
 
@@ -28,6 +29,7 @@
     - [wp_member_access] — Structural prefix for [ptr->field] access.
     - [wp_struct_field H_struct H_field v] — Observe + offset + provide value.
     - [wp_assign_local H_local] — L-value target of [local = rhs].
+    - [wp_assign_member_field H_local v H_struct H_field] — L-value target of [ptr->field = rhs].
     - [wp_eval_int_binop H_hty eval_lemma] — Prove [eval_binop] for integer binary ops.
     - [wp_eval_int_lt H_hty] — Alias: [wp_eval_int_binop H_hty eval_lt].
     - [wp_eval_ptr_neq_null tu cls] — Prove [nullptr != nullptr] evaluates to false.
@@ -39,6 +41,8 @@
     - [code_at_of_denoteModule] — Extract [code_at] from [denoteModule] via symbol lookup.
     - [wp_fptr_of_func_ok] — Compose [code_at] + [func_ok] → [wp_fptr].
     - [wp_operand_cfun2ptr_global] — Resolve [Ecast Cfun2ptr (Eglobal name ty)] (Admitted: BRiCk gap).
+    - [wp_operand_read_global_const] — Resolve [Ecast Cl2r (Eglobal name qty)] for const globals (Admitted: BRiCk gap).
+    - [wp_read_global_const HMOD lookup v] — Read a global const variable.
     - [wp_call_direct HMOD lookup body func_ok] — One-liner for call sites.
     - [wp_arg_prim eval_operand] — Evaluate one [wp_arg] for a primitive type.
     - [wp_nd_args_step eval_operand] — One level of [nd_seqs'] dispatch.
@@ -134,6 +138,25 @@ Proof. by rewrite _at_primR. Qed.
 Lemma tptstoR_to_fuzzyR (p : ptr) ty q v :
   p |-> tptstoR ty q v |-- p |-> tptsto_fuzzyR ty q v.
 Proof. by rewrite tptsto_fuzzyR_intro. Qed.
+
+(** Convert [tptstoR] back to [primR] for non-raw, non-undef values.
+
+    After an assignment, [wp_lval_assign] yields [p |-> tptstoR ty q v].
+    To reconstruct [treeR (Node ...)] via [treeR_node_fold], we need
+    [p |-> primR ty q v] (e.g. [boolR], [intR]).  This lemma bridges
+    the gap when the value is known to be concrete (not raw or undef).
+
+    Delegates to BRiCk's [tptstoR_Vxxx_primR] from [heap_pred.v].
+
+    Usage:
+<<
+      iPoseProof (tptstoR_to_primR with "H") as "H".
+>>
+*)
+Lemma tptstoR_to_primR (p : ptr) ty q v :
+  ~~ is_raw_or_undef v ->
+  p |-> tptstoR ty q v |-- p |-> primR ty q v.
+Proof. intros Hv. by rewrite tptstoR_Vxxx_primR. Qed.
 
 End wp_lemmas.
 
@@ -346,6 +369,39 @@ Ltac wp_assign_local H_local :=
   rewrite /read_decl /_local /=;
   wp_observe_ref H_local;
   iSplitL H_local; [wp_finish_anyR |].
+
+(** L-value target of [ptr->field = rhs].
+
+    Handles the LHS of an assignment like [curr->color = rhs]:
+    resolves [wp_lval_member] → [read_arrow] → local variable read →
+    [reference_to] observe from struct → [read_decl] → field [reference_to]
+    observe → [anyR] transfer.
+
+    Requires caller to [wp_offset H_field] first to convert the field
+    hypothesis from nested form to offset form.
+
+    [H_local] names the [tptsto_fuzzyR] for the local pointer variable.
+    [v] is the pointer value (e.g. [Vptr curr]).
+    [H_struct] names the [structR] hypothesis for the pointed-to struct.
+    [H_field] names the field hypothesis (already offset via [wp_offset]).
+
+    After the tactic, [iIntros "H_new"] binds the fresh [tptstoR] for
+    the updated field.
+
+    Usage:
+<<
+      wp_offset "_ncolor".
+      wp_assign_member_field "Hcurr_local" (Vptr curr) "_nstruct" "_ncolor".
+>>
+*)
+Ltac wp_assign_member_field H_local v H_struct H_field :=
+  iApply wp_lval_member; [reflexivity |];
+  rewrite /read_arrow /=;
+  wp_read_local H_local v;
+  wp_observe_ref H_struct;
+  rewrite /read_decl /=;
+  wp_observe_ref H_field;
+  iSplitL H_field; [iRevert H_field; rewrite primR_anyR; iIntros "$" |].
 
 (** Prove [eval_binop] for an integer binary operation.
 
@@ -611,7 +667,75 @@ Lemma wp_operand_cfun2ptr_global (tu : translation_unit)
   |-- wp_operand tu ρ (Ecast Cfun2ptr (Eglobal name ty)) Q.
 Proof. Admitted.
 
+(** Resolve [wp_operand (Ecast Cl2r (Eglobal name qty)) Q] for const globals.
+
+    When C++ code reads a global const (e.g. [Node::black]), the wp goal is:
+<<
+      wp_operand tu ρ (Ecast Cl2r (Eglobal name qty)) Q
+>>
+    This lemma resolves it from [denoteModule tu] and a symbol table lookup.
+
+    == Why this is Admitted ==
+
+    For global variables, [denoteModule] provides only [svalidR] (location
+    validity) via [denoteSymbol], not the initialized value.  The path to
+    the value requires [initializedR] at the global's address, but
+    [initSymbol] returns [emp] with an explicit TODO in [translation_unit.v]:
+<<
+      (* ^^ todo(gmm): static initialization is not yet supported *)
+>>
+    The [wp_operand_cast_l2r] axiom needs [initializedR] to extract the
+    value, which cannot be derived from [svalidR] alone.
+
+    This is the same class of BRiCk framework gap as [wp_operand_cfun2ptr_global]
+    (function alignment — above) and will become provable when BRiCk
+    implements static initialization support.
+
+    The [init] parameter documents the initializer found in the symbol table
+    (verified by [lookup_proof]) without enforcing it (since [initSymbol]
+    is [emp]).
+
+    Proof sketch (blocked at step 4):
+    1. [wp_operand_cast_l2r] → [wp_glval] → [wp_lval_global] → [read_decl]
+    2. [read_decl] (non-ref case) → [reference_to (erase_qualifiers qty) (_global name)]
+    3. [denoteModule_denoteSymbol] + lookup → [svalidR] → [strict_valid_ptr] → [reference_to] ✓
+    4. BLOCKED: [wp_operand_cast_l2r] needs [initializedR], but [denoteModule]
+       only provides [svalidR] ✗ *)
+Lemma wp_operand_read_global_const (tu : translation_unit)
+    (ρ : region) (name : obj_name) (qty : type) (init : global_init.t)
+    (v : val) (Q : val -> FreeTemps -> mpred) :
+  tu.(symbols) !! name = Some (Ovar qty init) ->
+  denoteModule tu ** Q v FreeTemps.id
+  |-- wp_operand tu ρ (Ecast Cl2r (Eglobal name qty)) Q.
+Proof. Admitted.
+
 End wp_call_lemmas.
+
+(** Read a global const variable.
+
+    Resolves [wp_operand (Ecast Cl2r (Eglobal name qty)) Q] for a global
+    const (e.g. [Node::black]).  Uses [wp_operand_read_global_const]
+    (Admitted) to rewrite the goal, then frames [denoteModule] from [HMOD].
+
+    Uses [rewrite] instead of [iApply] because the Coq unifier cannot
+    resolve the continuation evar [?Q] through [iApply]'s higher-order
+    matching when the continuation is complex (e.g. from [eval2] unfolding).
+    [rewrite] handles the matching directly at the term level.
+
+    [HMOD] names the persistent hypothesis holding [denoteModule tu].
+    [lookup_lemma] proves [tu.(symbols) !! name = Some (Ovar qty init)].
+    [v] is the runtime value of the constant (e.g. [Vbool false]).
+
+    After the tactic, the goal is the continuation [Q v FreeTemps.id].
+
+    Usage:
+<<
+      wp_read_global_const "HMOD" black_lookup (Vbool false).
+>>
+*)
+Ltac wp_read_global_const HMOD lookup_lemma v :=
+  rewrite -(wp_operand_read_global_const _ _ _ _ _ v _ lookup_lemma);
+  iSplitL HMOD; [iExact HMOD |].
 
 (** Resolve a [wp_fptr] goal from [denoteModule] + [func_ok].
 
