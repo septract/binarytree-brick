@@ -48,7 +48,7 @@
     5. Prove key lemma: [free] on a unique tree deallocates everything
 *)
 
-From Coq Require Import ZArith.
+From Stdlib Require Import ZArith.
 
 Require Import skylabs.lang.cpp.cpp.
 Import cQp_compat.

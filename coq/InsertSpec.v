@@ -55,7 +55,7 @@
     [noRedRed_insert], etc.) are proven in [RBTree.v] with zero [Admitted].
 *)
 
-From Coq Require Import ZArith Bool Lia.
+From Stdlib Require Import ZArith Bool Lia.
 
 Require Import skylabs.lang.cpp.cpp.
 Require Import skylabs.iris.extra.proofmode.proofmode.
@@ -413,7 +413,7 @@ Proof using MOD MODULE.
     iDestruct "Hspec" as (k v n t) "(%Hargs & Htree & Hcont)".
     injection Hargs as -> ->. subst.
     (** Step 1: wp through Sseq → Sdecl → wp_initialize → ∀ addr. *)
-    wp_auto. iIntros (addr).
+    wp_auto_anon.
     (** Step 2: Resolve [ins(k, v, n)] call.
         [wp_resolve_call] handles: Ecall rule → cfun2ptr → function pointer.
         [wp_nd_args] resolves all 6 argument evaluation orderings (3! = 6).
@@ -461,13 +461,12 @@ Proof using MOD MODULE.
          iIntros "_ncolor_new"; wp_auto.
     (** Step 7: Fold [treeR] back with color = Black.
         Convert [tptstoR] → [primR], revert offset, fold via [treeR_node_fold]. *)
-    all: iPoseProof (tptstoR_to_primR _ _ _ (Vbool false) I with "_ncolor_new") as "_ncolor";
-         wp_revert_offset "_ncolor";
+    all: wp_field_to_primR "_ncolor_new" "_ncolor" (Vbool false) I;
          iPoseProof (treeR_node_fold _ Black l' k' v' r' _lp _rp _rc curr
            with "[$_ntl $_ntr $_nrc $_ncolor $_nkey $_nval $_nleft $_nright $_nstruct]") as "Htree".
     (** Step 8: Semantic equivalence + return [curr]. *)
     all: iRevert "Htree"; rewrite /RBTree.insert Hins_eq makeBlack_node; iIntros "Htree";
-         wp_auto; iIntros (?);
+         wp_auto_anon;
          wp_read_local "Hcurr_local" (Vptr curr);
          iIntros "?"; repeat wp_step.
     (** Step 10: Return cleanup + postcondition.

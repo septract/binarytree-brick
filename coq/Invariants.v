@@ -36,7 +36,7 @@
     3. Prove by composing operation refinements with functional invariants
 *)
 
-From Coq Require Import ZArith List.
+From Stdlib Require Import ZArith List.
 Import ListNotations.
 
 Require Import daedalus_rb.RBTree.

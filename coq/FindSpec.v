@@ -17,7 +17,7 @@
     5. Prove using wp tactics (reusing techniques from FindSpec_draft.v).
 *)
 
-From Coq Require Import ZArith Bool Lia.
+From Stdlib Require Import ZArith Bool Lia.
 
 Require Import daedalus_rb.RBTree.
 
@@ -184,9 +184,7 @@ Ltac findNode_after_inner2_eval kn_tc k cv n q t _lp _rp _rc r_tc :=
       wp_auto;
       iApply wp_lval_assign;
       rewrite /=;
-      wp_member_access;
-      wp_read_local "Hcurr" (Vptr cv);
-      wp_struct_field "_nstruct" "_nright" (Vptr _rp);
+      wp_read_field "Hcurr" (Vptr cv) "_nstruct" "_nright" (Vptr _rp);
       wp_assign_local "Hcurr";
       iIntros "Hcurr_new";
       wp_auto;
@@ -209,9 +207,7 @@ Ltac findNode_after_inner2_eval kn_tc k cv n q t _lp _rp _rc r_tc :=
           iFrame "_nrc _ncolor _nkey _nval _nleft _nright _nstruct"
         | iExact "Hcont" ] ]
     | (* k = kn_tc: break *)
-      wp_auto;
-      let ret_p := fresh "ret_p" in
-      iIntros (ret_p);
+      wp_auto_anon;
       wp_read_local "Hcurr" (Vptr cv);
       iIntros "Hret_store";
       wp_auto;
@@ -252,9 +248,7 @@ Ltac findNode_after_inner1_eval kn_tc k cv n q t _lp _rp _rc l_tc r_tc :=
       wp_auto;
       iApply wp_lval_assign;
       rewrite /=;
-      wp_member_access;
-      wp_read_local "Hcurr" (Vptr cv);
-      wp_struct_field "_nstruct" "_nleft" (Vptr _lp);
+      wp_read_field "Hcurr" (Vptr cv) "_nstruct" "_nleft" (Vptr _lp);
       wp_assign_local "Hcurr";
       iIntros "Hcurr_new";
       wp_auto;
@@ -295,10 +289,7 @@ Ltac findNode_after_outer_eval cv tc k n q t :=
     iExists (Vbool false); rewrite /Vbool /=;
     iSplit;
     [ wp_eval_ptr_neq_null source _Node
-    | wp_auto;
-      let ret_p := fresh "ret_p" in
-      iIntros (ret_p);
-      wp_auto;
+    | wp_auto_anon;
       iIntros "Hret_store";
       wp_auto;
       wp_destroy_local "Hcurr";

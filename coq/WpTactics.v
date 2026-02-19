@@ -28,6 +28,7 @@
     - [wp_provide_value H v] — Provide [initializedR] evidence from [primR].
     - [wp_member_access] — Structural prefix for [ptr->field] access.
     - [wp_struct_field H_struct H_field v] — Observe + offset + provide value.
+    - [wp_read_field H v H_struct H_field v_field] — Read a field through a pointer.
     - [wp_assign_local H_local] — L-value target of [local = rhs].
     - [wp_assign_member_field H_local v H_struct H_field] — L-value target of [ptr->field = rhs].
     - [wp_destroy_prim_temp H] — Destroy one primitive-typed argument temporary.
@@ -35,6 +36,9 @@
     - [wp_assign_setup] — Assignment preamble: [wp_lval_assign] + [eval2] unfold.
     - [wp_eval_int_binop H_hty eval_lemma] — Prove [eval_binop] for integer binary ops.
     - [wp_eval_int_lt H_hty] — Alias: [wp_eval_int_binop H_hty eval_lt].
+    - [wp_eval_int_le H_hty] — Alias: [wp_eval_int_binop H_hty eval_le].
+    - [wp_eval_int_eq H_hty] — Alias: [wp_eval_int_binop H_hty eval_eq].
+    - [wp_eval_int_neq H_hty] — Alias: [wp_eval_int_binop H_hty eval_neq].
     - [wp_eval_ptr_neq_null tu cls] — Prove [nullptr != nullptr] evaluates to false.
     - [wp_eval_ptr_neq_nonnull tu cls H_valid] — Prove [cv != nullptr] evaluates to true.
     - [wp_binop tu eval_a eval_b kont] — Deduplicate [nd_seq] orderings.
@@ -55,10 +59,11 @@
     == Layer 3: Meta-Tactics ==
 
     - [wp_step] / [wp_auto] — Mechanical wp proof automation.
-    - [wp_expr_step] — Expression-level AST dispatcher.
+    - [wp_step_anon] / [wp_auto_anon] — Like [wp_step]/[wp_auto] + anonymous [iIntros (?)].
+    - [wp_step_debug] / [wp_auto_debug] — Like [wp_step]/[wp_auto] with [idtac] trace messages.
 *)
 
-From Coq Require Export ZArith.
+From Stdlib Require Export ZArith.
 
 Require Export skylabs.lang.cpp.cpp.
 Require Export skylabs.iris.extra.proofmode.proofmode.
@@ -356,6 +361,30 @@ Ltac wp_struct_field H_struct H_field v :=
   wp_observe_ref H_field;
   wp_provide_value H_field v.
 
+(** Read a struct field through a pointer in one step.
+
+    Combines [wp_member_access] → [wp_read_local] → [wp_struct_field]
+    into a single tactic for the common pattern of reading a field
+    through a local pointer variable (e.g. [curr->left]).
+
+    [H_local] names the [tptsto_fuzzyR] for the local pointer variable.
+    [v_ptr] is the pointer value (e.g. [Vptr cv]).
+    [H_struct] names the [structR] hypothesis at the pointed-to struct.
+    [H_field] names the field hypothesis (e.g. ["_nleft"]).
+    [v_field] is the expected field value (e.g. [Vptr lp]).
+
+    Replaces:
+<<
+      wp_member_access;
+      wp_read_local H_local v_ptr;
+      wp_struct_field H_struct H_field v_field.
+>>
+*)
+Ltac wp_read_field H_local v_ptr H_struct H_field v_field :=
+  wp_member_access;
+  wp_read_local H_local v_ptr;
+  wp_struct_field H_struct H_field v_field.
+
 (** L-value target of [local = rhs].
 
     After the RHS of an assignment is evaluated, this handles the l-value
@@ -509,6 +538,15 @@ Ltac wp_eval_int_binop H_hty eval_lemma :=
 
 (** Prove [eval_binop] for integer [<]. Alias for [wp_eval_int_binop]. *)
 Ltac wp_eval_int_lt H_hty := wp_eval_int_binop H_hty eval_lt.
+
+(** Prove [eval_binop] for integer [<=]. Alias for [wp_eval_int_binop]. *)
+Ltac wp_eval_int_le H_hty := wp_eval_int_binop H_hty eval_le.
+
+(** Prove [eval_binop] for integer [==]. Alias for [wp_eval_int_binop]. *)
+Ltac wp_eval_int_eq H_hty := wp_eval_int_binop H_hty eval_eq.
+
+(** Prove [eval_binop] for integer [!=]. Alias for [wp_eval_int_binop]. *)
+Ltac wp_eval_int_neq H_hty := wp_eval_int_binop H_hty eval_neq.
 
 (** Prove [nullptr != nullptr] evaluates to false (Leaf/null case).
 
@@ -1041,32 +1079,45 @@ Ltac wp_step :=
     and the AST is finite. *)
 Ltac wp_auto := repeat wp_step.
 
-(** Expression-level AST dispatcher (experimental).
+(** [wp_step_anon] extends [wp_step] with anonymous universal introduction.
 
-    Dispatches on the head AST constructor of expression-level wp goals.
-    Complements [wp_step] (which handles statement-level constructs)
-    without modifying that battle-tested tactic.
+    Many wp stepping points introduce universally quantified variables
+    (return pointers, intermediate addresses) that don't need named
+    Coq bindings. [wp_step] deliberately excludes [iIntros (?)] because
+    proofs often need named variables for loop invariants. [wp_step_anon]
+    is the opt-in variant for sequences where anonymous names suffice.
 
-    Uses [lazymatch] so failures propagate immediately (no silent
-    backtracking).  The [Ecast Cl2r (Evar _ _)] case only peels the
-    l2r cast (needs user-supplied hypothesis name and value for the
-    full [wp_read_local]).
+    [wp_auto_anon] repeats [wp_step_anon] until stuck. *)
+Ltac wp_step_anon := first [ wp_step | progress (iIntros (?)) ].
+Ltac wp_auto_anon := repeat wp_step_anon.
 
-    Note: matching on large cpp2v expressions (95K lines) may be slow.
-    If [lazymatch] performance degrades, restrict to smaller pattern sets.
-*)
-Ltac wp_expr_step :=
-  lazymatch goal with
-  | |- environments.envs_entails _
-       (wp_operand _ _ (Ecast Cl2r (Emember _ _ _ _ _)) _) =>
-      wp_member_access
-  | |- environments.envs_entails _
-       (wp_operand _ _ (Ecast Cnull2ptr _) _) =>
-      wp_null_val
-  | |- environments.envs_entails _
-       (wp_operand _ _ (Ecast Cl2r (Evar _ _)) _) =>
-      (* Can't fully dispatch — needs H and v arguments.
-         Just peel the l2r cast as a partial step. *)
-      iApply wp_operand_cast_l2r; rewrite /wp_glval /=
-  | _ => wp_step
-  end.
+(** [wp_step_debug] mirrors [wp_step] with [idtac] trace messages.
+
+    For a pedagogical project, knowing which [wp_step] rule fired is
+    invaluable for debugging stuck proofs. Each branch prints an [idtac]
+    message before firing, so [Set Ltac Profiling] or the Messages panel
+    shows the exact rule sequence.
+
+    [wp_auto_debug] repeats [wp_step_debug] until stuck. *)
+Ltac wp_step_debug :=
+  first [
+    idtac "wp_step: wp_seq"; iApply wp_seq |
+    idtac "wp_step: wp_break"; iApply wp_break |
+    idtac "wp_step: wp_return"; iApply wp_return |
+    idtac "wp_step: wp_expr"; iApply wp_expr |
+    idtac "wp_step: wp_block_eq"; progress (rewrite wp_block_eq /wp_block_def) |
+    idtac "wp_step: wp_decls_eq"; progress (rewrite wp_decls_eq /wp_decls_def /=) |
+    idtac "wp_step: wp_initialize"; progress (rewrite /wp_initialize /qual_norm /=) |
+    idtac "wp_step: wp_init_unqual"; progress (rewrite wp_initialize_unqualified.unlock /=) |
+    idtac "wp_step: to_arg_type"; progress (rewrite /to_arg_type /=) |
+    idtac "wp_step: wp_discard"; progress (rewrite /wp_discard /=) |
+    idtac "wp_step: wp_null_val"; wp_null_val |
+    idtac "wp_step: interp_unfold"; progress (rewrite interp_unfold /=) |
+    idtac "wp_step: while_unroll"; progress (rewrite /while_unroll) |
+    idtac "wp_step: Kloop"; progress (rewrite /Kloop /Kloop_inner /=) |
+    idtac "wp_step: Kfree/cleanup"; progress (rewrite /Kfree /Kat_exit /Kcleanup /Kreturn /Kreturn_inner /=) |
+    idtac "wp_step: get_return_type"; progress (rewrite /get_return_type /=) |
+    idtac "wp_step: iModIntro"; progress iModIntro |
+    idtac "wp_step: iNext"; progress iNext
+  ].
+Ltac wp_auto_debug := repeat wp_step_debug.

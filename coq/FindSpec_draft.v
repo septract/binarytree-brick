@@ -46,7 +46,7 @@
     ([skylabs.lang.cpp.*]), NOT the proprietary [skylabs.auto] package.
 *)
 
-From Coq Require Import ZArith Bool Lia.
+From Stdlib Require Import ZArith Bool Lia.
 
 Require Import daedalus_rb.RBTree.
 

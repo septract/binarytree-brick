@@ -129,3 +129,26 @@ Ltac wp_unfold_node H :=
   iDestruct H as (lp rp rc) "(_ntl & _ntr & _nnode)";
   iDestruct "_nnode" as
     "(_nrc & _ncolor & _nkey & _nval & _nleft & _nright & _nstruct)".
+
+(** Convert [tptstoR] back to [primR] and revert offset in one step.
+
+    After mutating a tree field via assignment, [wp_lval_assign] yields
+    [(p ,, f) |-> tptstoR ty q v]. To reconstruct [treeR (Node ...)] via
+    [treeR_node_fold], we need [p |-> (f |-> primR ty q v)]. This tactic:
+    1. Applies [tptstoR_to_primR] (requires [~~ is_raw_or_undef v])
+    2. Reverts the offset ([(p ,, f) |-> R] → [p |-> (f |-> R)])
+
+    [H_src] names the source hypothesis ([tptstoR] at offset form).
+    [H_dst] names the destination hypothesis (useful for renaming,
+    e.g. ["_ncolor_new"] → ["_ncolor"]).
+    [v] is the concrete value (e.g. [Vbool false]).
+    [Hpure] is a proof of [~~ is_raw_or_undef v] (typically [I]).
+
+    Usage:
+<<
+      wp_field_to_primR "_ncolor_new" "_ncolor" (Vbool false) I.
+>>
+*)
+Ltac wp_field_to_primR H_src H_dst v Hpure :=
+  iPoseProof (tptstoR_to_primR _ _ _ v Hpure with H_src) as H_dst;
+  wp_revert_offset H_dst.
