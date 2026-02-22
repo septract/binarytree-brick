@@ -42,6 +42,8 @@
     - [wp_eval_ptr_neq_null tu cls] — Prove [nullptr != nullptr] evaluates to false.
     - [wp_eval_ptr_neq_nonnull tu cls H_valid] — Prove [cv != nullptr] evaluates to true.
     - [wp_binop tu eval_a eval_b kont] — Deduplicate [nd_seq] orderings.
+    - [wp_cleanup_params H1 ...] — Clean up parameter [anyR]s at function return (arity-overloaded: 1-3 params).
+    - [wp_destroy_local_and_continue H] — Destroy a local when [wp_destroy_prim] is already exposed, split + [iNext].
 
     == Layer 2.5: Function Call Resolution ==
 
@@ -631,6 +633,50 @@ Ltac wp_binop tu eval_a eval_b kont :=
   iApply (wp_operand_binop tu);
   rewrite /nd_seq;
   iSplit; [ eval_a; eval_b; kont | eval_b; eval_a; kont ].
+
+(** Clean up parameter ownership at function return.
+
+    After applying the continuation, the remaining goals are [anyR] for
+    each parameter.  These must be split and closed with [wp_finish_anyR].
+    Arity-overloaded: 1 param (just finish), 2 params (1 split),
+    3 params (2 splits).
+
+    Usage:
+<<
+    wp_cleanup_params "Hpk" "Hpn".              (* 2 params *)
+    wp_cleanup_params "Hpk" "Hpv" "Hpn".        (* 3 params *)
+>>
+*)
+Tactic Notation "wp_cleanup_params" constr(H1) :=
+  wp_finish_anyR.
+
+Tactic Notation "wp_cleanup_params" constr(H1) constr(H2) :=
+  iSplitL H1; [wp_finish_anyR |]; wp_finish_anyR.
+
+Tactic Notation "wp_cleanup_params" constr(H1) constr(H2) constr(H3) :=
+  iSplitL H1; [wp_finish_anyR |];
+  iSplitL H2; [wp_finish_anyR |]; wp_finish_anyR.
+
+(** Destroy a local variable when the goal is [wp_destroy_prim].
+
+    Splits into destruction (closed by [wp_finish_anyR]) and
+    continuation (left open with [iNext] applied).
+
+    Use when [wp_destroy_local] fails because [destroy_val] is
+    already unfolded (e.g. after [repeat wp_step]).
+
+    [H] names the Iris hypothesis for the local variable's
+    [tptsto_fuzzyR].
+
+    Usage:
+<<
+    wp_destroy_local_and_continue "Hcurr_local".
+>>
+*)
+Ltac wp_destroy_local_and_continue H :=
+  iApply anyR_wp_destroy_prim_val; [done |];
+  try (cbn -[wp_destroy_prim destroy_val]);
+  iSplitL H; [wp_finish_anyR | iNext].
 
 (* ================================================================= *)
 (** ** Layer 2.5: Function Call Resolution *)

@@ -117,18 +117,10 @@ Proof using MOD MODULE.
          wp_read_local "Hcurr_local" (Vptr curr);
          iIntros "Hret_store"; repeat wp_step.
     (** Step 10: Destroy [curr] local + postcondition. *)
-    all: iApply anyR_wp_destroy_prim_val; [done |];
-         try (cbn -[wp_destroy_prim destroy_val]);
-         iSplitL "Hcurr_local";
-         [ (* Left: provide anyR for [addr] destruction *)
-           wp_finish_anyR
-         | (* Right: continuation — apply [Hcont] with tree + params *)
-           iNext;
-           iApply ("Hcont" $! curr with "[Htree]");
-           [ iExact "Htree"
-           | iFrame "Hret_store";
-             iSplitL "Hpk"; [wp_finish_anyR |];
-             iSplitL "Hpv"; [wp_finish_anyR | wp_finish_anyR] ] ].
+    all: wp_destroy_local_and_continue "Hcurr_local";
+         iApply ("Hcont" $! curr with "[Htree]");
+         [ iExact "Htree"
+         | iFrame "Hret_store"; wp_cleanup_params "Hpk" "Hpv" "Hpn" ].
 Qed.
 
 End with_Sigma.

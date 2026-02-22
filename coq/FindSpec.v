@@ -233,8 +233,7 @@ Ltac findNode_after_inner2_eval kn_tc k cv n q t _lp _rp _rc r_tc :=
           | destruct (kn_tc <? k)%Z eqn:E2;
             [ apply Z.ltb_lt in E2; lia
             | assumption ] ]
-        | iFrame "Hret_store";
-          iSplitL "Hpk"; [wp_finish_anyR | wp_finish_anyR] ] ] ] ].
+        | iFrame "Hret_store"; wp_cleanup_params "Hpk" "Hpn" ] ] ] ].
 
 (** Inner continuation: after evaluating both operands of [k < curr->key].
     Case-splits on [k < kn_tc]: go-left or else-branch (inner comparison). *)
@@ -301,8 +300,7 @@ Ltac findNode_after_outer_eval cv tc k n q t :=
         [ iFrame "Htree"; iPureIntro;
           match goal with Hc : findNode _ _ = findNode _ _ |- _ => rewrite Hc end;
           reflexivity
-        | iFrame "Hret_store";
-          iSplitL "Hpk"; [wp_finish_anyR | wp_finish_anyR] ] ] ]
+        | iFrame "Hret_store"; wp_cleanup_params "Hpk" "Hpn" ] ] ]
   | (* Node: cv ≠ nullptr, enter loop body *)
     iDestruct (treeR_node_nonnull with "Htree_cv") as "[Htree_cv %Hcv_ne]";
     iDestruct (treeR_node_valid with "Htree_cv") as "[Htree_cv #Hvalid_cv]";

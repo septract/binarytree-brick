@@ -97,7 +97,7 @@ Definition setRebalanceRight_name : obj_name :=
 Definition black_name : obj_name := Nscoped _Node_name (Nid "black").
 
 (* ================================================================= *)
-(** * Raw Extractions (local — only used for lookup proofs) *)
+(** * Function Extraction Helper *)
 (* ================================================================= *)
 
 (** Default [Func] for unreachable match branches. *)
@@ -109,32 +109,11 @@ Definition black_name : obj_name := Nscoped _Node_name (Nid "black").
    ; f_exception := exception_spec.NoThrow
    ; f_body := None |}.
 
-#[local] Definition insert_func_raw : Func :=
-  match source.(symbols) !! insert_name with
-  | Some (Ofunction f) => f
-  | _ => default_func
-  end.
-
-#[local] Definition ins_func_raw : Func :=
-  match source.(symbols) !! ins_name with
-  | Some (Ofunction f) => f
-  | _ => default_func
-  end.
-
-#[local] Definition makeCopy_func_raw : Func :=
-  match source.(symbols) !! makeCopy_name with
-  | Some (Ofunction f) => f
-  | _ => default_func
-  end.
-
-#[local] Definition setRebalanceLeft_func_raw : Func :=
-  match source.(symbols) !! setRebalanceLeft_name with
-  | Some (Ofunction f) => f
-  | _ => default_func
-  end.
-
-#[local] Definition setRebalanceRight_func_raw : Func :=
-  match source.(symbols) !! setRebalanceRight_name with
+(** Extract a [Func] from the symbol table by name.
+    Returns [default_func] for missing/non-function entries
+    (unreachable for names verified by lookup proofs below). *)
+#[local] Definition extract_func (name : obj_name) : Func :=
+  match source.(symbols) !! name with
   | Some (Ofunction f) => f
   | _ => default_func
   end.
@@ -142,16 +121,16 @@ Definition black_name : obj_name := Nscoped _Node_name (Nid "black").
 (* ================================================================= *)
 (** * Pre-computed Concrete Func Records
 
-    [Eval vm_compute] evaluates the raw extraction at definition time
+    [Eval vm_compute] evaluates [extract_func] at definition time
     and stores the concrete [Func] record in the [.vo] file.
     Subsequent imports unfold these to concrete values instantly. *)
 (* ================================================================= *)
 
-Definition insert_func : Func := Eval vm_compute in insert_func_raw.
-Definition ins_func : Func := Eval vm_compute in ins_func_raw.
-Definition makeCopy_func : Func := Eval vm_compute in makeCopy_func_raw.
-Definition setRebalanceLeft_func : Func := Eval vm_compute in setRebalanceLeft_func_raw.
-Definition setRebalanceRight_func : Func := Eval vm_compute in setRebalanceRight_func_raw.
+Definition insert_func : Func := Eval vm_compute in extract_func insert_name.
+Definition ins_func : Func := Eval vm_compute in extract_func ins_name.
+Definition makeCopy_func : Func := Eval vm_compute in extract_func makeCopy_name.
+Definition setRebalanceLeft_func : Func := Eval vm_compute in extract_func setRebalanceLeft_name.
+Definition setRebalanceRight_func : Func := Eval vm_compute in extract_func setRebalanceRight_name.
 
 (* ================================================================= *)
 (** * Lookup Proofs (cached in .vo via native_compute) *)
