@@ -44,6 +44,7 @@ COQ_SRCS := $(COQ_DIR)/WpTactics.v \
             $(COQ_DIR)/TreeRep.v \
             $(COQ_DIR)/Tactics.v \
             $(COQ_DIR)/FindSpec.v \
+            $(COQ_DIR)/InsertDefs.v \
             $(COQ_DIR)/InsertSpec.v \
             $(COQ_DIR)/RefCount.v \
             $(COQ_DIR)/Invariants.v
@@ -102,7 +103,12 @@ $(COQ_DIR)/Tactics.vo: $(COQ_DIR)/Tactics.v $(COQ_DIR)/RBTree.vo $(COQ_DIR)/Tree
 $(COQ_DIR)/FindSpec.vo: $(COQ_DIR)/FindSpec.v $(COQ_DIR)/RBTree.vo $(COQ_DIR)/TreeRep.vo $(COQ_DIR)/map_int_int_cpp.vo $(COQ_DIR)/Tactics.vo
 	$(COQC) $(COQFLAGS) $<
 
-$(COQ_DIR)/InsertSpec.vo: $(COQ_DIR)/InsertSpec.v $(COQ_DIR)/RBTree.vo $(COQ_DIR)/TreeRep.vo $(COQ_DIR)/Tactics.vo $(COQ_DIR)/map_int_int_cpp.vo
+# InsertDefs pre-computes function extractions from the AST (one-time ~5-10 min).
+# InsertSpec imports InsertDefs.vo (cached), avoiding per-rebuild AST traversal.
+$(COQ_DIR)/InsertDefs.vo: $(COQ_DIR)/InsertDefs.v $(COQ_DIR)/RBTree.vo $(COQ_DIR)/TreeRep.vo $(COQ_DIR)/map_int_int_cpp.vo
+	$(COQC) $(COQFLAGS) $<
+
+$(COQ_DIR)/InsertSpec.vo: $(COQ_DIR)/InsertSpec.v $(COQ_DIR)/RBTree.vo $(COQ_DIR)/TreeRep.vo $(COQ_DIR)/Tactics.vo $(COQ_DIR)/InsertDefs.vo
 	$(COQC) $(COQFLAGS) $<
 
 $(COQ_DIR)/RefCount.vo: $(COQ_DIR)/RefCount.v $(COQ_DIR)/RBTree.vo $(COQ_DIR)/TreeRep.vo $(COQ_DIR)/Tactics.vo
@@ -114,7 +120,7 @@ $(COQ_DIR)/Invariants.vo: $(COQ_DIR)/Invariants.v $(COQ_DIR)/RBTree.vo
 proofs: $(COQ_DIR)/WpTactics.vo \
         $(COQ_DIR)/RBTree.vo $(COQ_DIR)/TreeRep.vo \
         $(COQ_DIR)/Tactics.vo $(COQ_DIR)/FindSpec.vo \
-        $(COQ_DIR)/InsertSpec.vo \
+        $(COQ_DIR)/InsertDefs.vo $(COQ_DIR)/InsertSpec.vo \
         $(COQ_DIR)/RefCount.vo $(COQ_DIR)/Invariants.vo
 
 # ---- Cleanup ----
