@@ -1,135 +1,147 @@
-# BRiCk Verification of Daedalus Red-Black Tree
+# binarytree-brick
 
-Formal verification of the Daedalus C++ red-black tree (`ddl/map.h`) using
-[BRiCk](https://github.com/bedrocksystems/BRiCk) — a separation logic
-framework for C++ built on the Iris framework in Coq.
+Formal verification of a C++ red-black tree using
+[BRiCk](https://github.com/bedrocksystems/BRiCk) — a separation-logic
+framework for C++ built on Iris in the Rocq Prover (Coq) — together with a
+companion functional model and proofs in Lean 4.
 
-## Why BRiCk?
+The C++ under verification is the red-black tree map from
+[Daedalus](https://github.com/GaloisInc/daedalus) (`rts-c/ddl/map.h`), a
+reference-counted `Map<K,V>`. The goal is an end-to-end refinement proof: the
+C++ implementation refines a pure functional specification that itself is
+proved to preserve the red-black invariants.
 
-CBMC (bounded model checker) cannot parse the Daedalus headers because its
-hand-maintained C++ parser crashes on `std::numeric_limits<size_t>::max()` in
-`ddl/size.h`. BRiCk avoids this entirely: it uses Clang's fully-elaborated AST,
-so templates, `if constexpr`, and standard library types are all resolved before
-translation to Coq.
+> **Status: work in progress.** The functional specification and the `findNode`
+> refinement proof are complete and machine-checked. The `insert` path is
+> partially proved with remaining `admit`s. See
+> [Proof status](#proof-status) below.
 
-## Prerequisites
+## Repository layout
 
-Install via Homebrew:
-
-```bash
-brew install opam llvm cmake
+```
+.
+├── README.md
+├── LICENSE                     # BSD 3-Clause
+├── NOTICE                      # third-party provenance (Daedalus, BRiCk)
+├── Makefile                    # cpp2v + Rocq proof build
+├── coq/                        # Rocq (Coq) separation-logic proofs
+│   ├── _CoqProject
+│   ├── RBTree.v                #   Functional spec (ported from lean/Rbtree/Daedalus.lean)
+│   ├── TreeRep.v               #   Separation-logic representation predicate (treeR)
+│   ├── WpTactics.v             #   Generic weakest-precondition tactic library
+│   ├── Tactics.v               #   Tree-specific tactics + lemmas
+│   ├── FindSpec.v              #   findNode refinement proof (complete)
+│   ├── InsertDefs.v            #   AST function extractions + specs (cached layer)
+│   ├── InsertSpec.v            #   insert refinement proof
+│   ├── RebalanceSpec.v         #   setRebalanceLeft/Right proofs (WIP)
+│   ├── InsSpec.v               #   ins proof via Löb induction (WIP)
+│   ├── RefCount.v              #   reference-counting correctness (ghost state)
+│   └── Invariants.v            #   end-to-end glue proofs
+├── ddl/                        # Unmodified Daedalus C++ headers (see NOTICE)
+│   ├── map.h                   #   the code under verification
+│   ├── boxed.h  size.h  maybe.h  debug.h
+├── src/
+│   └── map_int_int.cpp         # monomorphized Map<int,int> driver for cpp2v
+├── lean/                       # Lean 4 functional model + invariant proofs
+│   ├── lakefile.toml
+│   └── Rbtree/                 #   Classic, DoubleBlack, and Daedalus variants + Equiv
+├── docs/                       # design notes
+└── .claude/skills/brick/       # Claude Code skill for writing BRiCk wp proofs
 ```
 
-- **opam** >= 2.1 — OCaml package manager (manages Coq and Iris)
-- **llvm** — cpp2v links against libclang (Apple Clang doesn't ship the dev headers)
-- **cmake** — builds cpp2v from source
+## The two halves
 
-## Setup
+### Lean model (`lean/`)
 
-From this directory:
+A standalone Lean 4 development of red-black trees, used to design and validate
+the functional specification before porting it to Rocq. It contains three
+insertion/deletion variants — `Classic`, `DoubleBlack`, and `Daedalus` (matching
+the C++) — with BST and no-red-red invariant proofs, plus `Equiv.lean` proving
+the variants agree. `Rbtree/Daedalus.lean` is the direct ancestor of `coq/RBTree.v`.
+
+Build:
 
 ```bash
-make setup       # ~20 min: builds cpp2v + installs Coq/Iris
+cd lean
+lake build
 ```
 
-This does two things (which can also be run independently):
+### BRiCk / Rocq proofs (`coq/`)
 
-1. **`make setup-cpp2v`** — Clones the BRiCk repo, builds the `cpp2v` binary
-   via cmake, linking against Homebrew LLVM. The binary lands at
-   `.brick-src/rocq-skylabs-cpp2v/build/cpp2v`.
+The refinement proof proper. It follows a standard strategy:
 
-2. **`make setup-coq`** — Creates an opam switch called `brick` with OCaml
-   5.1.1, then installs the Rocq Prover (Coq) 9.1 and Iris.
+1. **Functional spec** (`RBTree.v`) — pure Rocq definitions mirroring
+   `lean/Rbtree/Daedalus.lean`: `ins`, `insert`, `findNode`, `IsBST`,
+   `NoRedRed`, etc., with their invariant-preservation lemmas.
+2. **Representation predicate** (`TreeRep.v`) — links the Rocq `tree` type to
+   the C++ `Node` heap layout via BRiCk separation-logic assertions (`treeR`).
+3. **Refinement proofs** (`FindSpec.v`, `InsertSpec.v`, `RebalanceSpec.v`,
+   `InsSpec.v`, `RefCount.v`) — each C++ function is shown to refine its
+   functional counterpart via a Hoare triple / weakest-precondition proof.
+4. **Glue** (`Invariants.v`) — composes the refinement and functional-invariant
+   proofs toward end-to-end correctness.
 
-Verify everything is working:
+#### Why BRiCk (not CBMC)?
+
+CBMC's hand-maintained C++ parser crashes on
+`std::numeric_limits<size_t>::max()` in `ddl/size.h`. BRiCk instead consumes
+Clang's fully-elaborated AST via `cpp2v`, so templates, `if constexpr`, and
+standard-library types are all resolved before translation to Rocq.
+
+## Building the Rocq proofs
+
+> **Note.** A turnkey, reproducible build environment (pinned BRiCk + Rocq +
+> Iris) is not yet checked in — this is the next planned step. The instructions
+> below describe the current manual workflow against a locally built BRiCk
+> workspace.
+
+The proofs require a built [BRiCk](https://github.com/bedrocksystems/BRiCk)
+workspace providing `coqc` and the `cpp2v` binary. Only the *public*
+components of BRiCk (`skylabs.lang.cpp`, `skylabs.iris.extra`) are used; no
+proprietary packages are required. The `Makefile` expects the workspace under
+`.brick-workspace/` (gitignored):
 
 ```bash
+# 1. Build the BRiCk workspace (public repos only), then activate it.
+#    See https://github.com/bedrocksystems/BRiCk for current instructions.
+source .brick-workspace/dev/activate.sh
+
+# 2. Generate the Rocq deep embedding of the C++ AST from cpp2v (~96K lines).
+make cpp2v
+
+# 3. Compile the generated AST (slow: ~30–60 min).
+make ast
+
+# 4. Build the hand-written proofs.
+make proofs
+
+# Check toolchain + proof status at any point:
 make status
 ```
 
-## Usage
+The generated files (`coq/map_int_int_cpp.v`, `coq/map_int_int_cpp_names.v`)
+are gitignored, as are all Rocq build artifacts.
 
-### Generate the Coq deep embedding
+## Proof status
 
-```bash
-make cpp2v
-```
+| Component | File | Status |
+|---|---|---|
+| Functional RB-tree spec + invariants | `coq/RBTree.v` | ✅ Complete — 41 `Qed`, 0 `admit` |
+| Representation predicate | `coq/TreeRep.v` | ✅ Complete |
+| Generic wp tactic library | `coq/WpTactics.v` | ✅ Usable (some helper lemmas admitted) |
+| `findNode` refinement | `coq/FindSpec.v` | ✅ Complete — 0 `admit` |
+| `insert` top-level refinement | `coq/InsertSpec.v` | 🟡 `insert_ok` proved modulo admitted callees |
+| `setRebalanceLeft/Right` | `coq/RebalanceSpec.v` | 🟠 WIP — contains `admit`s |
+| `ins` (Löb induction) | `coq/InsSpec.v` | 🟠 WIP — contains `admit`s |
+| Reference counting | `coq/RefCount.v` | 🔲 Scaffolded (ghost state, Phase 6) |
+| End-to-end glue | `coq/Invariants.v` | 🔲 Scaffolded |
 
-Runs `cpp2v` on `src/map_int_int.cpp` (a monomorphized `Map<int,int>` driver)
-and produces two files in `coq/`:
+The Lean development (`lean/`) is fully proved and CI-checked.
 
-- `map_int_int_cpp.v` — Deep embedding of the C++ AST (~96K lines)
-- `map_int_int_cpp_names.v` — Symbol table for mangled C++ names (~3K lines)
+See `2026-02-13_brick_verification_plan.md`, `2026-02-20_fast_iteration_plan.md`,
+and `2026-02-22_phase5b_plan.md` for the detailed phase breakdown and approach.
 
-These are gitignored since they're generated.
+## License
 
-### Build the Coq proofs
-
-```bash
-eval $(opam env --switch=brick)
-make proofs
-```
-
-Compiles all `.v` files in `coq/` using `coq_makefile`. Requires the generated
-AST files to exist (run `make cpp2v` first).
-
-### Clean
-
-```bash
-make clean       # Remove generated .v files and Coq build artifacts
-make clean-all   # Also remove the cloned BRiCk source tree
-```
-
-## Directory Structure
-
-```
-brick/
-├── README.md
-├── Makefile                  # setup, cpp2v, proofs, status, clean
-├── 2026-02-13_brick_verification_plan.md   # Detailed approach + phase tracker
-├── ddl/                      # Unmodified Daedalus headers (copied from cbmc/ddl/)
-│   ├── map.h                 #   The C++ code under verification
-│   ├── boxed.h               #   Reference counting (HasRefs, Boxed<T>)
-│   ├── size.h                #   Contains std::numeric_limits (the CBMC blocker)
-│   ├── maybe.h               #   Optional type
-│   └── debug.h               #   Debug macros (no-op at DEBUG_LEVEL=0)
-├── src/
-│   └── map_int_int.cpp       # Monomorphized driver for cpp2v
-├── coq/
-│   ├── _CoqProject           # Coq project file
-│   ├── RBTree.v              # Functional spec (ported from Lean)
-│   ├── TreeRep.v             # Separation logic representation predicate
-│   ├── FindSpec.v            # FindNode specification + proof scaffold
-│   ├── InsertSpec.v          # Insert/ins/rebalance specs
-│   ├── RefCount.v            # Reference counting correctness
-│   └── Invariants.v          # End-to-end glue proofs
-└── .brick-src/               # (gitignored) Cloned BRiCk repo with built cpp2v
-```
-
-## Proof Architecture
-
-The verification follows a refinement strategy:
-
-1. **Functional spec** (`RBTree.v`): Pure Coq definitions mirroring the Lean
-   formalization in `Rbtree/Daedalus.lean`. Defines `ins`, `insert`, `findNode`,
-   `IsBST`, `NoRedRed`, etc.
-
-2. **Representation predicate** (`TreeRep.v`): Links the Coq `tree` type to
-   the C++ `Node` heap layout using BRiCk's separation logic assertions.
-
-3. **Refinement proofs** (`FindSpec.v`, `InsertSpec.v`, `RefCount.v`): Each C++
-   function is shown to refine its functional spec counterpart via Hoare triples.
-
-4. **Glue** (`Invariants.v`): Composes refinement proofs with functional
-   invariant proofs for end-to-end correctness.
-
-## Current Status
-
-- **Phase 1 (Infrastructure)**: Complete. cpp2v generates correct Coq output;
-  all target functions and struct fields present in the AST.
-- **Phase 2 (Functional Spec)**: Complete. All 35 lemmas/theorems in
-  `coq/RBTree.v` are machine-checked (zero `Admitted`). Covers BST preservation,
-  NoRedRed preservation, findNode correctness, and fromList invariants.
-- **Phase 3-7 (Separation Logic Proofs)**: Scaffolded with `Admitted` placeholders.
-
-See `2026-02-13_brick_verification_plan.md` for the full phase breakdown.
+BSD 3-Clause (see [LICENSE](LICENSE)). The `ddl/` headers are copied from
+Daedalus (also BSD 3-Clause); see [NOTICE](NOTICE) for third-party provenance.
