@@ -976,6 +976,38 @@ Ltac wp_call_direct HMOD lookup_lemma body_proof func_ok_lemma func_def :=
     iSplitR; [iExact "_call_fok"|]
   ].
 
+(** Like [wp_call_direct] but takes an Iris hypothesis name for the
+    [func_ok] proof, instead of a Coq lemma.  Needed for Löb induction,
+    where the recursive [func_ok] is in the Iris context (as [□ (...)])
+    rather than as a proved Coq lemma.
+
+    [HMOD]: persistent hypothesis holding [denoteModule tu]
+    [lookup_lemma]: proof that function is in the symbol table
+    [body_proof]: proof that function has a body
+    [hyp]: Iris hypothesis name holding [func_ok tu f spec] (from [iLöb])
+    [func_def]: the function definition term (e.g. [ins_func])
+
+    Usage:
+<<
+    wp_call_from_hyp "HMOD" ins_lookup ins_has_body "IH" ins_func.
+>>
+*)
+Ltac wp_call_from_hyp HMOD lookup_lemma body_proof hyp func_def :=
+  try iNext;
+  iPoseProof (code_at_of_denoteModule _ _ _ lookup_lemma body_proof
+    with HMOD) as "#_call_ca";
+  match goal with |- context[wp_fptr _ ?ft _ _ _] =>
+    change ft with (type_of_value (Ofunction func_def))
+  end;
+  first [
+    iApply (wp_fptr_of_func_ok _ _ _ _ _ _);
+    iSplitR; [iExact "_call_ca"|];
+    iSplitR; [iExact hyp|]
+  | iApply (wp_fptr_of_func_ok_compat _ _ _ _ _ _ (tu_compat));
+    iSplitR; [iExact "_call_ca"|];
+    iSplitR; [iExact hyp|]
+  ].
+
 (** Evaluate one [wp_arg] for a primitive type ([Tint], [Tptr], etc.).
 
     After [nd_seqs] case-splitting identifies which argument to evaluate,

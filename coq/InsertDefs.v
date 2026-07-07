@@ -92,6 +92,24 @@ Definition setRebalanceRight_name : obj_name :=
       (Tptr _Node :: Tptr _Node :: nil)).
 #[local] Close Scope pstring_scope.
 
+(** ** is_black *)
+
+#[local] Open Scope pstring_scope.
+Definition is_black_name : obj_name :=
+  Nscoped _Node_name
+    (Nfunction function_qualifiers.N "is_black"
+      (Tptr (Qconst _Node) :: nil)).
+#[local] Close Scope pstring_scope.
+
+(** ** is_red *)
+
+#[local] Open Scope pstring_scope.
+Definition is_red_name : obj_name :=
+  Nscoped _Node_name
+    (Nfunction function_qualifiers.N "is_red"
+      (Tptr (Qconst _Node) :: nil)).
+#[local] Close Scope pstring_scope.
+
 (** ** Node::black (global const) *)
 
 Definition black_name : obj_name := Nscoped _Node_name (Nid "black").
@@ -131,6 +149,8 @@ Definition ins_func : Func := Eval vm_compute in extract_func ins_name.
 Definition makeCopy_func : Func := Eval vm_compute in extract_func makeCopy_name.
 Definition setRebalanceLeft_func : Func := Eval vm_compute in extract_func setRebalanceLeft_name.
 Definition setRebalanceRight_func : Func := Eval vm_compute in extract_func setRebalanceRight_name.
+Definition is_black_func : Func := Eval vm_compute in extract_func is_black_name.
+Definition is_red_func : Func := Eval vm_compute in extract_func is_red_name.
 
 (* ================================================================= *)
 (** * Lookup Proofs (cached in .vo via native_compute) *)
@@ -158,14 +178,39 @@ Lemma setRebalanceRight_lookup :
     Some (Ofunction setRebalanceRight_func).
 Proof. native_compute. reflexivity. Qed.
 
+Lemma is_black_lookup :
+  source.(symbols) !! is_black_name = Some (Ofunction is_black_func).
+Proof. native_compute. reflexivity. Qed.
+
+Lemma is_red_lookup :
+  source.(symbols) !! is_red_name = Some (Ofunction is_red_func).
+Proof. native_compute. reflexivity. Qed.
+
 Lemma black_lookup :
   source.(symbols) !! black_name =
     Some (Ovar (Qconst Tbool) (global_init.Init (Ebool false))).
 Proof. native_compute. reflexivity. Qed.
 
-(** Machine-checked proof that [ins_func] has a body. Required by
+(** Machine-checked proofs that functions have bodies.  Required by
     [code_at_of_denoteModule] to extract [code_at] from [denoteModule]. *)
 Lemma ins_has_body : exists body, ins_func.(f_body) = Some body.
+Proof. vm_compute. eexists. reflexivity. Qed.
+
+Lemma is_black_has_body : exists body, is_black_func.(f_body) = Some body.
+Proof. vm_compute. eexists. reflexivity. Qed.
+
+Lemma is_red_has_body : exists body, is_red_func.(f_body) = Some body.
+Proof. vm_compute. eexists. reflexivity. Qed.
+
+Lemma setRebalanceLeft_has_body :
+  exists body, setRebalanceLeft_func.(f_body) = Some body.
+Proof. vm_compute. eexists. reflexivity. Qed.
+
+Lemma setRebalanceRight_has_body :
+  exists body, setRebalanceRight_func.(f_body) = Some body.
+Proof. vm_compute. eexists. reflexivity. Qed.
+
+Lemma makeCopy_has_body : exists body, makeCopy_func.(f_body) = Some body.
 Proof. vm_compute. eexists. reflexivity. Qed.
 
 (* ================================================================= *)
@@ -205,7 +250,12 @@ Definition ins_spec : function_spec :=
        \post{ret}[Vptr ret]
          ret |-> treeR (cQp.m 1) (ins k v t))).
 
-(** ** setRebalanceLeft_spec *)
+(** ** setRebalanceLeft_spec
+
+    Field-level ownership at [n]: the caller has consumed the left subtree
+    (via recursive [ins]) and retains field-level struct ownership plus the
+    right subtree.  The stale left pointer [lp] is never read — every code
+    path overwrites it before use.  [newL] is the full tree from [ins]. *)
 Definition setRebalanceLeft_spec : function_spec :=
   SFunction (cc:=CC_C) (ar:=Ar_Definite) (Tptr _Node)
     (Tptr _Node :: Tptr _Node :: nil)
@@ -213,12 +263,24 @@ Definition setRebalanceLeft_spec : function_spec :=
       (Tptr _Node :: Tptr _Node :: nil)
       (\arg{n_ptr} "n" (Vptr n_ptr)
        \arg{nl_ptr} "newLeft" (Vptr nl_ptr)
-       \pre{c k v l r} n_ptr |-> treeR (cQp.m 1) (Node c l k v r)
-       \pre nl_ptr |-> treeR (cQp.m 1) Leaf
+       \pre{c k v lp rp rc r newL}
+         n_ptr |-> (_ref_count |-> ulongR (cQp.m 1) rc **
+                    _color     |-> boolR (cQp.m 1) (color_to_bool c) **
+                    _key       |-> intR (cQp.m 1) k **
+                    _value     |-> intR (cQp.m 1) v **
+                    _left      |-> ptrR<_Node> (cQp.m 1) lp **
+                    _right     |-> ptrR<_Node> (cQp.m 1) rp **
+                    structR _Node_name (cQp.m 1)) **
+         rp |-> treeR (cQp.m 1) r **
+         nl_ptr |-> treeR (cQp.m 1) newL
        \post{ret}[Vptr ret]
-         ret |-> treeR (cQp.m 1) (setRebalanceLeft c Leaf k v r))).
+         ret |-> treeR (cQp.m 1) (setRebalanceLeft c newL k v r))).
 
-(** ** setRebalanceRight_spec *)
+(** ** setRebalanceRight_spec
+
+    Mirror of [setRebalanceLeft_spec]: the caller has consumed the right
+    subtree (via recursive [ins]) and retains field-level struct ownership
+    plus the left subtree. *)
 Definition setRebalanceRight_spec : function_spec :=
   SFunction (cc:=CC_C) (ar:=Ar_Definite) (Tptr _Node)
     (Tptr _Node :: Tptr _Node :: nil)
@@ -226,10 +288,66 @@ Definition setRebalanceRight_spec : function_spec :=
       (Tptr _Node :: Tptr _Node :: nil)
       (\arg{n_ptr} "n" (Vptr n_ptr)
        \arg{nr_ptr} "newRight" (Vptr nr_ptr)
-       \pre{c k v l r} n_ptr |-> treeR (cQp.m 1) (Node c l k v r)
-       \pre nr_ptr |-> treeR (cQp.m 1) Leaf
+       \pre{c k v lp rp rc l newR}
+         n_ptr |-> (_ref_count |-> ulongR (cQp.m 1) rc **
+                    _color     |-> boolR (cQp.m 1) (color_to_bool c) **
+                    _key       |-> intR (cQp.m 1) k **
+                    _value     |-> intR (cQp.m 1) v **
+                    _left      |-> ptrR<_Node> (cQp.m 1) lp **
+                    _right     |-> ptrR<_Node> (cQp.m 1) rp **
+                    structR _Node_name (cQp.m 1)) **
+         lp |-> treeR (cQp.m 1) l **
+         nr_ptr |-> treeR (cQp.m 1) newR
        \post{ret}[Vptr ret]
-         ret |-> treeR (cQp.m 1) (setRebalanceRight c l k v Leaf))).
+         ret |-> treeR (cQp.m 1) (setRebalanceRight c l k v newR))).
+
+(** ** is_black_spec
+
+    Minimal field-level: only needs [_color + structR] for non-null.
+    [option Color] covers both null (black by convention) and non-null.
+    [\prepost] returns resources unchanged — [is_black] is read-only.
+
+    The C++ type is [Node const*] = [Tptr (Qconst _Node)]. *)
+Definition is_black_spec : function_spec :=
+  SFunction (cc:=CC_C) (ar:=Ar_Definite) Tbool
+    (Tptr (Qconst _Node) :: nil)
+    (cpp_spec (ar:=Ar_Definite) Tbool
+      (Tptr (Qconst _Node) :: nil)
+      (\arg{n_ptr} "n" (Vptr n_ptr)
+       \prepost{c_opt : option Color}
+         match c_opt with
+         | None => [| n_ptr = nullptr |]
+         | Some c => Exists (q : Qp),
+             n_ptr |-> (_color |-> boolR q (color_to_bool c) **
+                        structR _Node_name q)
+         end
+       \post{ret : ptr}[Vbool (match c_opt with
+                                  | None => true
+                                  | Some Black => true
+                                  | Some Red => false end)]
+         emp)).
+
+(** ** is_red_spec
+
+    Negation of [is_black_spec]. Same ownership pattern. *)
+Definition is_red_spec : function_spec :=
+  SFunction (cc:=CC_C) (ar:=Ar_Definite) Tbool
+    (Tptr (Qconst _Node) :: nil)
+    (cpp_spec (ar:=Ar_Definite) Tbool
+      (Tptr (Qconst _Node) :: nil)
+      (\arg{n_ptr} "n" (Vptr n_ptr)
+       \prepost{c_opt : option Color}
+         match c_opt with
+         | None => [| n_ptr = nullptr |]
+         | Some c => Exists (q : Qp),
+             n_ptr |-> (_color |-> boolR q (color_to_bool c) **
+                        structR _Node_name q)
+         end
+       \post{ret : ptr}[Vbool (match c_opt with
+                                  | None => false
+                                  | Some Black => false
+                                  | Some Red => true end)]
+         emp)).
 
 (** ** insert_spec *)
 Definition insert_spec : function_spec :=
@@ -250,6 +368,14 @@ Definition insert_spec : function_spec :=
 
 Lemma makeCopy_ok :
   |-- func_ok source makeCopy_func makeCopy_spec.
+Proof. Admitted.
+
+Lemma is_black_ok :
+  |-- func_ok source is_black_func is_black_spec.
+Proof. Admitted.
+
+Lemma is_red_ok :
+  |-- func_ok source is_red_func is_red_spec.
 Proof. Admitted.
 
 Lemma setRebalanceLeft_ok :
