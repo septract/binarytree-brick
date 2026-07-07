@@ -136,6 +136,34 @@ alignment (`align_of` for `Tfunction`) and static initialization
 lemmas, not `Axiom`s. `findNode_ok` does not depend on either. See
 [`docs/brick-framework-gaps.v`](docs/brick-framework-gaps.v).
 
+## What is actually connected to the C++
+
+The proofs are about the **real compiled code**, not a re-transcription: every
+function is extracted from the `cpp2v`-generated AST of `cpp/ddl/map.h` (via
+`source.(symbols) !! …`), and the extraction is machine-checked by
+`native_compute` (e.g. `findNode_lookup`). Each `func_ok source f spec` states
+that the extracted body `f`, executed under BRiCk's C++ operational semantics,
+satisfies `spec`. The `treeR` field layout matches the struct (`ref_count :
+size_t → ulongR`, `color : bool → boolR`, `key/value : int → intR`,
+`left/right → ptrR`). There are **no `Axiom`s** in the proof files.
+
+Two honest limits on that connection today:
+
+1. **Results are conditional on module well-formedness.** Every theorem is
+   proved under a section hypothesis that the driver translation unit is
+   well-formed (`map_int_int_cpp.source ⊧ σ`, and for the insert path
+   `|-- denoteModule source`). These are standard, dischargeable BRiCk side
+   conditions, but nothing in the repo discharges them yet — so the theorems
+   currently read "*if* the module is well-formed, *then* the C++ refines its
+   spec." Closing this is part of the Phase G capstone.
+
+2. **`findNode_spec` is deliberately partial.** It proves the C++ returns
+   `nullptr` **iff** the key is absent (so `contains` is correct), but in the
+   found case it only asserts `ret <> nullptr` — it does *not* yet expose that
+   the returned node holds the value `findNode` computed. (`ins_spec` /
+   `insert_spec`, by contrast, pin down the entire resulting tree, values
+   included.) Strengthening it is tracked in [`TODO.md`](TODO.md).
+
 ## Roadmap
 
 The path to a complete proof of the C++ tree is tracked in [`TODO.md`](TODO.md),
