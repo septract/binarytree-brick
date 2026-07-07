@@ -1,5 +1,10 @@
 (** * Two BRiCk Framework Gaps: Function Alignment & Static Initialization
 
+    NOTE: This file is a documentation artifact, not part of the proof build
+    (it is intentionally excluded from the Makefile and _CoqProject). It records
+    two framework-level gaps encountered during the insert proof, stated as
+    self-contained [Admitted] lemmas for discussion with BRiCk maintainers.
+
     We are verifying a C++ red-black tree against its cpp2v-generated AST
     using BRiCk (Coq + Iris separation logic).  During proof development we
     encountered two lemmas that appear semantically valid but are blocked by

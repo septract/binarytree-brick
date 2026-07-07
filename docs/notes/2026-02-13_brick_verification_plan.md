@@ -34,7 +34,7 @@ All tools are installed locally via the SkylabsAI/workspace meta-repo.
 
 ```bash
 cd daedalus-rb/brick
-git clone https://github.com/AIMeetsAG/workspace .brick-workspace
+git clone https://github.com/SkyLabsAI/workspace .brick-workspace
 cd .brick-workspace
 make clone-public -j         # Clone BRiCk and dependencies
 make dev-setup-opam          # Create opam switch with OCaml 5.4.0

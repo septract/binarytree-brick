@@ -3,10 +3,10 @@
     Proves that the C++ [Node::findNode] function refines the functional
     [findNode] from [RBTree.v].
 
-    Unlike FindSpec_draft.v (which proved properties of a hand-transcribed
-    AST copy), this file extracts the function DIRECTLY from the cpp2v-
-    generated translation unit [map_int_int_cpp.source] via symbol table
-    lookup. The extraction is machine-checked by [native_compute].
+    This file extracts the function DIRECTLY from the cpp2v-generated
+    translation unit [map_int_int_cpp.source] via symbol table lookup,
+    rather than from a hand-transcribed copy of the AST. The extraction
+    is machine-checked by [native_compute].
 
     == Approach ==
 
@@ -14,14 +14,14 @@
     2. Look up [findNode_name] in [source.(symbols)] to get the actual [Func].
     3. Prove the lookup succeeds via [native_compute; reflexivity].
     4. State [func_ok source findNode_func findNode_spec].
-    5. Prove using wp tactics (reusing techniques from FindSpec_draft.v).
+    5. Prove using the wp tactics from [Tactics.v] / [WpTactics.v].
 *)
 
 From Stdlib Require Import ZArith Bool Lia.
 
 Require Import daedalus_rb.RBTree.
 
-(** ** Directional recursion lemmas (reused from FindSpec_draft.v) *)
+(** ** Directional recursion lemmas *)
 
 Lemma findNode_lt : forall k c l kn vn r,
   (k < kn)%Z ->

@@ -1,10 +1,11 @@
-# Coq project file for Daedalus RB tree BRiCk verification.
+# Coq/Rocq project file for the Daedalus RB tree BRiCk verification.
 #
 # The generated files (map_int_int_cpp.v, map_int_int_cpp_names.v) are
 # produced by cpp2v and must exist before building. Run `make cpp2v`
-# from the parent directory first.
+# from the repository root first.
 #
-# Build: coq_makefile -f _CoqProject -o Makefile.coq && make -f Makefile.coq
+# The canonical build is driven by the top-level Makefile. This file is
+# provided for editor / IDE integration (e.g. VsCoq, Proof General).
 
 -R . daedalus_rb
 
@@ -12,14 +13,23 @@
 map_int_int_cpp_names.v
 map_int_int_cpp.v
 
-# Functional specification (ported from Lean)
+# Generic weakest-precondition tactic library (no tree/AST dependencies)
+WpTactics.v
+
+# Functional specification (ported from lean/Rbtree/Daedalus.lean)
 RBTree.v
 
-# Separation logic representation predicate
+# Separation-logic representation predicate
 TreeRep.v
+
+# Tree-specific tactics and lemmas
+Tactics.v
 
 # Operation specifications and proofs
 FindSpec.v
+InsertDefs.v
 InsertSpec.v
+RebalanceSpec.v
+InsSpec.v
 RefCount.v
 Invariants.v

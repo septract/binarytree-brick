@@ -1,4 +1,4 @@
-# BRiCk verification of Daedalus RB tree (ddl/map.h).
+# BRiCk verification of Daedalus RB tree (cpp/ddl/map.h).
 #
 # Targets:
 #   make proofs      - Build all Coq proofs (requires AST to be compiled first)
@@ -31,14 +31,14 @@ CPP2V     := $(WS_BUILD)/bin/cpp2v
 
 # ---- Project files ----
 
-SRC       := src/map_int_int.cpp
+SRC       := cpp/src/map_int_int.cpp
+DDL_DIR   := cpp/ddl
 COQ_DIR   := coq
 GEN_AST   := $(COQ_DIR)/map_int_int_cpp.v
 GEN_NAMES := $(COQ_DIR)/map_int_int_cpp_names.v
 
-# Coq source files (order matters for dependency chain)
-# Note: FindSpec_draft.v is a prototype with a hand-transcribed AST (not built).
-# FindSpec.v extracts the function from source's symbol table (the correct way).
+# Coq source files (order matters for dependency chain).
+# FindSpec.v extracts the function from the cpp2v symbol table (the correct way).
 COQ_SRCS := $(COQ_DIR)/WpTactics.v \
             $(COQ_DIR)/RBTree.v \
             $(COQ_DIR)/TreeRep.v \
@@ -63,11 +63,11 @@ all: cpp2v ast proofs
 # Run cpp2v to generate the Coq deep embedding of the C++ AST.
 cpp2v: $(GEN_AST)
 
-$(GEN_AST): $(SRC) ddl/map.h ddl/boxed.h ddl/size.h ddl/maybe.h ddl/debug.h
+$(GEN_AST): $(SRC) $(DDL_DIR)/map.h $(DDL_DIR)/boxed.h $(DDL_DIR)/size.h $(DDL_DIR)/maybe.h $(DDL_DIR)/debug.h
 	$(CPP2V) -v \
 	  -names $(GEN_NAMES) \
 	  -o $(GEN_AST) \
-	  $(SRC) -- -std=c++17 -I.
+	  $(SRC) -- -std=c++17 -Icpp
 
 # ---- Coq proofs ----
 

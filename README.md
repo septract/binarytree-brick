@@ -1,7 +1,7 @@
 # binarytree-brick
 
 Formal verification of a C++ red-black tree using
-[BRiCk](https://github.com/bedrocksystems/BRiCk) — a separation-logic
+[BRiCk](https://github.com/SkyLabsAI/BRiCk) — a separation-logic
 framework for C++ built on Iris in the Rocq Prover (Coq) — together with a
 companion functional model and proofs in Lean 4.
 
@@ -37,15 +37,19 @@ proved to preserve the red-black invariants.
 │   ├── InsSpec.v               #   ins proof via Löb induction (WIP)
 │   ├── RefCount.v              #   reference-counting correctness (ghost state)
 │   └── Invariants.v            #   end-to-end glue proofs
-├── ddl/                        # Unmodified Daedalus C++ headers (see NOTICE)
-│   ├── map.h                   #   the code under verification
-│   ├── boxed.h  size.h  maybe.h  debug.h
-├── src/
-│   └── map_int_int.cpp         # monomorphized Map<int,int> driver for cpp2v
+├── cpp/                        # The C++ under verification
+│   ├── ddl/                    #   Unmodified Daedalus headers (see NOTICE)
+│   │   ├── map.h               #     the code under verification
+│   │   └── boxed.h  size.h  maybe.h  debug.h
+│   └── src/
+│       └── map_int_int.cpp     #   monomorphized Map<int,int> driver for cpp2v
 ├── lean/                       # Lean 4 functional model + invariant proofs
 │   ├── lakefile.toml
 │   └── Rbtree/                 #   Classic, DoubleBlack, and Daedalus variants + Equiv
 ├── docs/                       # design notes
+│   ├── 2026-02-12_formal_verification_daedalus_rbt.md   # verification-approach survey
+│   ├── brick-framework-gaps.v  #   two BRiCk framework gaps (not built)
+│   └── notes/                  #   historical development notes
 └── .claude/skills/brick/       # Claude Code skill for writing BRiCk wp proofs
 ```
 
@@ -84,7 +88,7 @@ The refinement proof proper. It follows a standard strategy:
 #### Why BRiCk (not CBMC)?
 
 CBMC's hand-maintained C++ parser crashes on
-`std::numeric_limits<size_t>::max()` in `ddl/size.h`. BRiCk instead consumes
+`std::numeric_limits<size_t>::max()` in `cpp/ddl/size.h`. BRiCk instead consumes
 Clang's fully-elaborated AST via `cpp2v`, so templates, `if constexpr`, and
 standard-library types are all resolved before translation to Rocq.
 
@@ -95,15 +99,16 @@ standard-library types are all resolved before translation to Rocq.
 > below describe the current manual workflow against a locally built BRiCk
 > workspace.
 
-The proofs require a built [BRiCk](https://github.com/bedrocksystems/BRiCk)
+The proofs require a built [BRiCk](https://github.com/SkyLabsAI/BRiCk)
 workspace providing `coqc` and the `cpp2v` binary. Only the *public*
 components of BRiCk (`skylabs.lang.cpp`, `skylabs.iris.extra`) are used; no
 proprietary packages are required. The `Makefile` expects the workspace under
-`.brick-workspace/` (gitignored):
+`.brick-workspace/` (gitignored), built via the public
+[SkyLabsAI/workspace](https://github.com/SkyLabsAI/workspace) meta-repo:
 
 ```bash
 # 1. Build the BRiCk workspace (public repos only), then activate it.
-#    See https://github.com/bedrocksystems/BRiCk for current instructions.
+#    See https://github.com/SkyLabsAI/workspace for current instructions.
 source .brick-workspace/dev/activate.sh
 
 # 2. Generate the Rocq deep embedding of the C++ AST from cpp2v (~96K lines).
@@ -138,8 +143,8 @@ are gitignored, as are all Rocq build artifacts.
 
 The Lean development (`lean/`) is fully proved and CI-checked.
 
-See `2026-02-13_brick_verification_plan.md`, `2026-02-20_fast_iteration_plan.md`,
-and `2026-02-22_phase5b_plan.md` for the detailed phase breakdown and approach.
+See [`docs/notes/`](docs/notes/) for the detailed phase breakdown and the
+historical development notes.
 
 ## License
 
