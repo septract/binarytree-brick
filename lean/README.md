@@ -5,8 +5,7 @@ repository is to design and validate the functional specification *before*
 porting it to Rocq: [`Rbtree/Daedalus.lean`](Rbtree/Daedalus.lean) is the
 direct ancestor of [`../coq/RBTree.v`](../coq/RBTree.v).
 
-All proofs are complete — no `sorry`, `admit`, or `axiom` — and the library is
-checked in CI (`.github/workflows/lean_action_ci.yml`).
+All proofs are complete — no `sorry`, `admit`, or `axiom`.
 
 ## Build
 

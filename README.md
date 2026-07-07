@@ -63,11 +63,10 @@ insertion/deletion variants — `Classic`, `DoubleBlack`, and `Daedalus` (matchi
 the C++) — with BST and no-red-red invariant proofs, plus `Equiv.lean` proving
 the variants agree. `Rbtree/Daedalus.lean` is the direct ancestor of `coq/RBTree.v`.
 
-Build:
+Build (needs only [`elan`](https://github.com/leanprover/elan)):
 
 ```bash
-cd lean
-lake build
+cd lean && lake build
 ```
 
 ### BRiCk / Rocq proofs (`coq/`)
@@ -92,40 +91,27 @@ CBMC's hand-maintained C++ parser crashes on
 Clang's fully-elaborated AST via `cpp2v`, so templates, `if constexpr`, and
 standard-library types are all resolved before translation to Rocq.
 
-## Building the Rocq proofs
+## Building
 
-> **Note.** A turnkey, reproducible build environment (pinned BRiCk + Rocq +
-> Iris) is not yet checked in — this is the next planned step. The instructions
-> below describe the current manual workflow against a locally built BRiCk
-> workspace.
-
-The proofs require a built [BRiCk](https://github.com/SkyLabsAI/BRiCk)
-workspace providing `coqc` and the `cpp2v` binary. Only the *public*
-components of BRiCk (`skylabs.lang.cpp`, `skylabs.iris.extra`) are used; no
-proprietary packages are required. The `Makefile` expects the workspace under
-`.brick-workspace/` (gitignored), built via the public
-[SkyLabsAI/workspace](https://github.com/SkyLabsAI/workspace) meta-repo:
+See **[BUILDING.md](BUILDING.md)** for the full guide. In short:
 
 ```bash
-# 1. Build the BRiCk workspace (public repos only), then activate it.
-#    See https://github.com/SkyLabsAI/workspace for current instructions.
+# Lean (fast, self-contained):
+cd lean && lake build
+
+# Rocq proofs (builds BRiCk from source; ~30-60 min first run):
+make check      # preflight: check host tools
+make setup      # clone + build the pinned BRiCk toolchain into .brick-workspace/
 source .brick-workspace/dev/activate.sh
-
-# 2. Generate the Rocq deep embedding of the C++ AST from cpp2v (~96K lines).
-make cpp2v
-
-# 3. Compile the generated AST (slow: ~30–60 min).
-make ast
-
-# 4. Build the hand-written proofs.
-make proofs
-
-# Check toolchain + proof status at any point:
-make status
+make cpp2v && make ast && make proofs
+make status     # toolchain + per-file proof status
 ```
 
-The generated files (`coq/map_int_int_cpp.v`, `coq/map_int_int_cpp_names.v`)
-are gitignored, as are all Rocq build artifacts.
+Only the *public* components of BRiCk (`skylabs.lang.cpp`, `skylabs.iris.extra`)
+are used; no proprietary packages are required. The exact toolchain commits are
+pinned in [`scripts/pins.env`](scripts/pins.env). The `cpp2v`-generated files
+(`coq/map_int_int_cpp.v`, `coq/map_int_int_cpp_names.v`) and all build artifacts
+are gitignored.
 
 ## Proof status
 
@@ -141,7 +127,7 @@ are gitignored, as are all Rocq build artifacts.
 | Reference counting | `coq/RefCount.v` | 🔲 Scaffolded (ghost state, Phase 6) |
 | End-to-end glue | `coq/Invariants.v` | 🔲 Scaffolded |
 
-The Lean development (`lean/`) is fully proved and CI-checked.
+The Lean development (`lean/`) is fully proved (no `sorry`/`admit`).
 
 See [`docs/notes/`](docs/notes/) for the detailed phase breakdown and the
 historical development notes.

@@ -1,10 +1,8 @@
-# BRiCk workspace (SkylabsAI/workspace meta-repo, built locally)
+# BRiCk workspace (SkyLabsAI/workspace meta-repo, built locally by
+# scripts/setup-brick-workspace.sh)
 .brick-workspace/
 
-# Old BRiCk source checkout (deprecated, use workspace)
-.brick-src/
-
-# Local opam switch
+# Local opam switch (created by the setup script)
 _opam/
 
 # Coq build artifacts

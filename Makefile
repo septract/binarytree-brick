@@ -7,13 +7,14 @@
 #   make status      - Check toolchain installation status
 #   make clean       - Remove generated files
 #   make all         - cpp2v + ast + proofs
+#   make setup       - Clone + build the pinned BRiCk workspace (~30-60 min)
+#   make check       - Preflight host-tool version checks only
 #
-# Prerequisites:
-#   The BRiCk workspace must be built first:
-#     cd .brick-workspace && make clone-public -j && make dev-setup
-#     make update-opam-deps && dune build
+# Prerequisites (see BUILDING.md for the full guide):
+#   The BRiCk toolchain (Rocq + cpp2v) must be built first. The easiest path:
+#     make setup       # clones .brick-workspace/ at pinned commits and builds
 #
-#   Then activate before running this Makefile:
+#   Then activate before running the proof targets (in each new shell):
 #     source .brick-workspace/dev/activate.sh
 
 # ---- Workspace paths ----
@@ -54,9 +55,20 @@ COQ_SRCS := $(COQ_DIR)/WpTactics.v \
 # Common flags: set COQLIB and the -R mapping for our project
 COQFLAGS := -coqlib $(COQLIB) -R $(COQ_DIR) daedalus_rb
 
-.PHONY: all proofs ast cpp2v clean status
+.PHONY: all setup check proofs ast cpp2v clean status
 
 all: cpp2v ast proofs
+
+# ---- Toolchain setup ----
+
+# Clone + build the pinned BRiCk workspace under .brick-workspace/.
+# First run takes ~30-60 min (builds Rocq from source). See BUILDING.md.
+setup:
+	scripts/setup-brick-workspace.sh
+
+# Preflight: check host tools without cloning or building anything.
+check:
+	scripts/setup-brick-workspace.sh --check
 
 # ---- cpp2v translation ----
 
@@ -147,7 +159,7 @@ status:
 	  $(COQC) -coqlib $(COQLIB) --version; \
 	else \
 	  echo "NOT FOUND at $(COQC)"; \
-	  echo "Build the workspace first: cd $(WORKSPACE) && dune build"; \
+	  echo "Build the toolchain first: make setup   (see BUILDING.md)"; \
 	fi
 	@echo ""
 	@echo "--- cpp2v ---"

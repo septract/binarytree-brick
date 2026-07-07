@@ -6,7 +6,7 @@ user-invokable: false
 
 # BRiCk C++ Verification in Coq
 
-[BRiCk](https://github.com/bedrocksystems/BRiCk) is a separation logic
+[BRiCk](https://github.com/SkyLabsAI/BRiCk) is a separation logic
 framework for formally verifying C++ code. It uses **cpp2v** to translate
 Clang's fully-elaborated AST into a Coq deep embedding, then proves
 correctness via Hoare triples in the **Iris** framework.
@@ -39,9 +39,9 @@ cpp2v -v -names output_names.v -o output_cpp.v input.cpp -- -std=c++17 -I.
 
 ## External Resources
 
-- **BRiCk repo**: https://github.com/bedrocksystems/BRiCk
-  - [`howto_sequential.v`](https://github.com/bedrocksystems/BRiCk/blob/master/rocq-skylabs-brick/theories/noimport/doc/cpp/howto_sequential.v) — best tutorial
-  - [`theories/lang/cpp/`](https://github.com/bedrocksystems/BRiCk/tree/master/rocq-skylabs-brick/theories/lang/cpp) — core theory files
+- **BRiCk repo**: https://github.com/SkyLabsAI/BRiCk
+  - [`howto_sequential.v`](https://github.com/SkyLabsAI/BRiCk/blob/master/rocq-skylabs-brick/theories/noimport/doc/cpp/howto_sequential.v) — best tutorial
+  - [`theories/lang/cpp/`](https://github.com/SkyLabsAI/BRiCk/tree/master/rocq-skylabs-brick/theories/lang/cpp) — core theory files
 - **Workspace meta-repo**: https://github.com/SkylabsAI/workspace
 - **Iris framework**: https://iris-project.org/
   - [Iris tutorial (POPL'21)](https://gitlab.mpi-sws.org/iris/tutorial-popl21)
