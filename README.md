@@ -129,8 +129,19 @@ are gitignored.
 
 The Lean development (`lean/`) is fully proved (no `sorry`/`admit`).
 
-See [`docs/notes/`](docs/notes/) for the detailed phase breakdown and the
-historical development notes.
+**Trusted base.** The completed proofs rest only on BRiCk's own axiom base plus
+**two** documented BRiCk framework gaps (`coq/WpTactics.v`): function-pointer
+alignment (`align_of` for `Tfunction`) and static initialization
+(`initializedR` for global consts). Both are stated as deferred `Admitted`
+lemmas, not `Axiom`s. `findNode_ok` does not depend on either. See
+[`docs/brick-framework-gaps.v`](docs/brick-framework-gaps.v).
+
+## Roadmap
+
+The path to a complete proof of the C++ tree is tracked in [`TODO.md`](TODO.md),
+with the full rationale, soundness review, and dependency graph in
+[`docs/2026-07-07_technical_review_and_roadmap.md`](docs/2026-07-07_technical_review_and_roadmap.md).
+See also [`docs/notes/`](docs/notes/) for historical development notes.
 
 ## License
 
