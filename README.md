@@ -138,12 +138,25 @@ are gitignored.
 
 The Lean development (`lean/`) is fully proved (no `sorry`/`admit`).
 
-**Trusted base.** The completed proofs rest only on BRiCk's own axiom base plus
-**two** documented BRiCk framework gaps (`coq/WpTactics.v`): function-pointer
-alignment (`align_of` for `Tfunction`) and static initialization
-(`initializedR` for global consts). Both are stated as deferred `Admitted`
-lemmas, not `Axiom`s. `findNode_ok` does not depend on either. See
-[`docs/brick-framework-gaps.v`](docs/brick-framework-gaps.v).
+**Trusted base.** Beyond BRiCk's own axiom base, the write-path proofs now rest
+on a single, documented, **proven-sound** axiom for the first BRiCk framework
+gap:
+
+- **Function-pointer alignment** — `align_of (Tfunction ft) = Some 1`
+  (`coq/WpTactics.v`, `align_of_function`). C++ leaves function-type alignment
+  undefined, so BRiCk has no axiom for it; this is BRiCk's own proposed fix and
+  is sound (`size_of (Tfunction) = None` makes the size/alignment axiom vacuous;
+  `aligned_ptr 1 p` holds for every `p`). With it, `wp_operand_cfun2ptr_global`
+  — the direct-call callee step — is **fully proved** (was previously
+  `Admitted`), which unblocks the `insert` write path.
+
+The second gap — **static initialization** (`initializedR` for the
+`Node::black`/`red` global consts) — remains a deferred `Admitted`
+(`wp_operand_read_global_const`); the plan is to eliminate it at the source by
+inlining those trivial constants (see [`TODO.md`](TODO.md) A1-init) rather than
+trust an axiom. `findNode_ok` depends on neither gap. Background:
+[`docs/brick-framework-gaps.v`](docs/brick-framework-gaps.v) and
+[`docs/2026-07-07_brick_gaps_upstream_review.md`](docs/2026-07-07_brick_gaps_upstream_review.md).
 
 ## What is actually connected to the C++
 

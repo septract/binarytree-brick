@@ -30,23 +30,24 @@ found that **both can be closed locally**, which reshapes this phase from
 "wait on upstream" to "close them ourselves." Do A1-fn and A1-init below;
 upstream filing (A1a) becomes optional/nice-to-have.
 
-- [ ] **A1-fn** Close Gap 1 (function alignment) locally — the sound, tiny fix.
-      `align_of (Tfunction …)` is unconstrained (`size_of (Tfunction) = None`,
-      verified types.v:79, makes the `align_of_size_of'` axiom vacuous for
-      functions), so asserting `= Some 1` is sound. Steps:
-  - [ ] Add `Axiom align_of_function : ∀ cc ar ret args, align_of
-        (Tfunction (FunctionType (ft_cc:=cc) (ft_arity:=ar) ret args)) = Some 1%N`
-        in a clearly-labeled `Trusted.v`, with the soundness note (1 | va always;
-        C++ leaves function alignment undefined, so this invents a value the
-        standard omits — harmless since function pointers are only called, never
-        used for object-alignment reasoning).
-  - [ ] **Actually prove** `wp_operand_cfun2ptr_global` from it (`code_at` from
-        `denoteModule` gives `strict_valid_ptr`; `reference_to_intro` +
-        `align_of_function` closes `reference_to (Tfunction …)`). Do NOT leave it
-        `Admitted` — verify the chain against our pinned BRiCk (the review's line
-        refs are approximate/from `main`).
-  - [ ] Remove the `Admitted` on `wp_operand_cfun2ptr_global`; rebuild.
-        ⇒ unblocks the entire write path (Phases B–E).
+- [x] **A1-fn** Close Gap 1 (function alignment) locally — **DONE** (commits
+      `0b571a3`, `54dcfac`; validated `54dcfac`..`InsertSpec` build EXIT 0).
+  - [x] Added `Axiom align_of_function : ∀ ft, align_of (Tfunction ft) = Some 1`
+        in `WpTactics.v` (not a separate `Trusted.v` — kept beside the lemma it
+        feeds), with the full soundness note. Sound: `size_of (Tfunction)=None`
+        (types.v:79) makes `align_of_size_of'` vacuous; `aligned_ptr_min` gives
+        `aligned_ptr 1 p` for all p.
+  - [x] Proved `aligned_ptr_ty_function` + `reference_to_function`
+        (`reference_to_intro` + `has_type_ptr'` + `strict_valid_valid`).
+  - [x] Proved `wp_operand_cfun2ptr_global` for real (Cfun2ptr →
+        `wp_operand_cast_fun2ptr_cpp` → `wp_lval_global` → `read_decl` non-ref
+        branch → frame Q + `reference_to_function` from
+        `code_at_of_denoteModule`/`code_at_strict_valid`). Removed its `Admitted`;
+        signature tightened `ty:type` → `ft:function_type`.
+  - [x] Verified downstream: `insert_ok` (uses `wp_resolve_call` →
+        `wp_operand_cfun2ptr_global`) rebuilds clean; `Print Assumptions
+        insert_ok` shows the Gap-1 admit gone, replaced by `align_of_function`.
+        ⇒ write path (Phases B–E) no longer blocked by Gap 1.
 - [ ] **A1-init** Close Gap 2 (static-init const read) at the target — no axiom.
       `Node::black`/`red` are `static const Color(=bool)` literals
       (`cpp/ddl/map.h:32-33`); every use is a compare or rvalue assign. Inline
