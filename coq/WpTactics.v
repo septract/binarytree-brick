@@ -823,54 +823,48 @@ Proof.
   iPureIntro. apply aligned_ptr_ty_function.
 Qed.
 
-(** Resolve [wp_operand (Ecast Cfun2ptr (Eglobal name ty)) Q] from [denoteModule].
+(** Resolve [wp_operand (Ecast Cfun2ptr (Eglobal name (Tfunction ft))) Q] from
+    [denoteModule] — the callee-expression step for a direct call to a named
+    global function.
 
-    Combines [wp_operand_cast_fun2ptr_cpp] (Cfun2ptr cast axiom) +
-    [wp_lval_global] + [read_decl] (global lvalue resolution) into
-    a single step, producing the continuation instantiated at
-    [Vptr (_global name)].
+    == Proof (now closed; was the Gap-1 [Admitted]) ==
 
-    == Why this is Admitted ==
+    1. [wp_operand_cast_fun2ptr_cpp]: Cfun2ptr → [wp_lval] on the [Eglobal].
+    2. [wp_lval_global]: Eglobal → [read_decl (_global name) (Tfunction ft)].
+    3. [read_decl] on a non-reference type reduces to
+       [reference_to (erase_qualifiers (Tfunction ft)) (_global name) ** Q …].
+    4. Frame [Q] from the hypothesis; build the [reference_to] via
+       [reference_to_function] (above) from [strict_valid_ptr (_global name)],
+       which [code_at_of_denoteModule] + [code_at_strict_valid] extract from
+       [denoteModule].
 
-    For function types, [read_decl] requires [reference_to (erase_qualifiers ty)]
-    which needs [aligned_ptr_ty] → [align_of ty = Some _]. The BRiCk axiom
-    system declares [align_of] as a [Parameter] with no axiom for [Tfunction],
-    making [aligned_ptr_ty (Tfunction _) p] unprovable through the standard chain.
-
-    The BRiCk developers acknowledge this gap at wp.v line 730:
-<<
-      (this rule has a problem with function references because
-       there is no alignment for functions)
-      Two options:
-      1. functions have 1 alignment
-      2. there is a special rule for [has_type (Vref r) (Tref (Tfunction ..))]
-         that ignores this
->>
-
-    This lemma is semantically valid: the compiler places compiled functions
-    at valid, aligned addresses — a fact captured by [code_at] (which provides
-    [strict_valid_ptr]) but not expressible through [reference_to] due to the
-    missing alignment axiom.
-
-    This is NOT an [Axiom] — it is a deferred proof obligation (like [ins_ok]
-    and other [Admitted] function specs). It will become provable when the
-    upstream BRiCk library implements either fix mentioned above.
-
-    Proof sketch (blocked at step 6):
-    1. [wp_operand_cast_fun2ptr_cpp]: Cfun2ptr → [wp_lval]
-    2. [wp_lval_global]: Eglobal → [read_decl]
-    3. Unfold [read_decl] (default case for non-reference types)
-    4. Goal: [reference_to (erase_qualifiers ty) (_global name) ** Q ...]
-    5. Frame [Q] from hypothesis; extract [code_at] → [strict_valid_ptr]
-    6. BLOCKED: [reference_to] requires [aligned_ptr_ty] → [align_of = Some _] *)
+    The single non-BRiCk assumption is [align_of_function] (see above); this
+    lemma is otherwise fully proved. Historically this was the function-alignment
+    gap; we close it with BRiCk's own proposed "functions have 1 alignment". *)
 Lemma wp_operand_cfun2ptr_global (tu : translation_unit)
-    (ρ : region) (name : obj_name) (f : Func) (ty : type)
+    (ρ : region) (name : obj_name) (f : Func) (ft : function_type)
     (Q : val -> FreeTemps -> mpred) :
   tu.(symbols) !! name = Some (Ofunction f) ->
   (exists body, f.(f_body) = Some body) ->
   denoteModule tu ** Q (Vptr (_global name)) FreeTemps.id
-  |-- wp_operand tu ρ (Ecast Cfun2ptr (Eglobal name ty)) Q.
-Proof. Admitted.
+  |-- wp_operand tu ρ (Ecast Cfun2ptr (Eglobal name (Tfunction ft))) Q.
+Proof.
+  intros Hlookup Hbody.
+  iIntros "[HMOD HQ]".
+  (* Cfun2ptr: reduce to wp_lval on the Eglobal *)
+  iApply wp_operand_cast_fun2ptr_cpp.
+  (* Eglobal: reduce to read_decl (_global name) (Tfunction ft) *)
+  iApply wp_lval_global.
+  (* read_decl on a non-ref type = reference_to (erase_qualifiers ..) ** Q .. *)
+  rewrite /read_decl /=.
+  (* goal: reference_to (Tfunction (FunctionType ..)) (_global name)
+           ** Q (Vptr (_global name)) 1%free *)
+  iSplitR "HQ"; [ | iExact "HQ" ].
+  (* build reference_to at a function type from code_at's strict_valid_ptr *)
+  iApply reference_to_function.
+  iApply code_at_strict_valid.
+  iApply (code_at_of_denoteModule tu f name Hlookup Hbody with "HMOD").
+Qed.
 
 (** Resolve [wp_operand (Ecast Cl2r (Eglobal name qty)) Q] for const globals.
 
