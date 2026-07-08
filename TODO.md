@@ -22,22 +22,54 @@ Status legend: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked
 ## Phase A — Enable direct C++ calls  `[!]` gate for everything below
 
 The two BRiCk framework gaps in `WpTactics.v` block all direct function calls
-and global-const reads. Highest-leverage item.
+and global-const reads. Highest-leverage item. **Both are confirmed still open
+on upstream `main` (checked 2026-07-07, head `4a8ce6c`), so bumping the pin will
+NOT close them** — but the upstream-review doc
+([`docs/2026-07-07_brick_gaps_upstream_review.md`](docs/2026-07-07_brick_gaps_upstream_review.md))
+found that **both can be closed locally**, which reshapes this phase from
+"wait on upstream" to "close them ourselves." Do A1-fn and A1-init below;
+upstream filing (A1a) becomes optional/nice-to-have.
 
-- [ ] **A1a** File upstream BRiCk issues for both gaps, referencing
-      `docs/brick-framework-gaps.v`:
-  - [ ] function alignment: `align_of (Tfunction …)` has no axiom
-        (blocks `wp_operand_cfun2ptr_global`).
-  - [ ] static initialization: `initSymbol` returns `emp`
-        (blocks `wp_operand_read_global_const`).
-- [ ] **A1b** Interim: consolidate the two `Admitted` lemmas into a single
-      `Trusted.v` with a header explaining they are BRiCk gaps, and add a
-      `Print Assumptions` audit target to the Makefile so the trusted base is
-      visible in one place.
-- [ ] **A1c** Real fix: once upstream lands, pin the new BRiCk commit in
-      `scripts/pins.env`, close both `admit`s, re-run `make proofs`.
-- [ ] **A1d** Update README proof-status to name the trusted base explicitly
-      (and note `findNode_ok` does not depend on it).
+- [ ] **A1-fn** Close Gap 1 (function alignment) locally — the sound, tiny fix.
+      `align_of (Tfunction …)` is unconstrained (`size_of (Tfunction) = None`,
+      verified types.v:79, makes the `align_of_size_of'` axiom vacuous for
+      functions), so asserting `= Some 1` is sound. Steps:
+  - [ ] Add `Axiom align_of_function : ∀ cc ar ret args, align_of
+        (Tfunction (FunctionType (ft_cc:=cc) (ft_arity:=ar) ret args)) = Some 1%N`
+        in a clearly-labeled `Trusted.v`, with the soundness note (1 | va always;
+        C++ leaves function alignment undefined, so this invents a value the
+        standard omits — harmless since function pointers are only called, never
+        used for object-alignment reasoning).
+  - [ ] **Actually prove** `wp_operand_cfun2ptr_global` from it (`code_at` from
+        `denoteModule` gives `strict_valid_ptr`; `reference_to_intro` +
+        `align_of_function` closes `reference_to (Tfunction …)`). Do NOT leave it
+        `Admitted` — verify the chain against our pinned BRiCk (the review's line
+        refs are approximate/from `main`).
+  - [ ] Remove the `Admitted` on `wp_operand_cfun2ptr_global`; rebuild.
+        ⇒ unblocks the entire write path (Phases B–E).
+- [ ] **A1-init** Close Gap 2 (static-init const read) at the target — no axiom.
+      `Node::black`/`red` are `static const Color(=bool)` literals
+      (`cpp/ddl/map.h:32-33`); every use is a compare or rvalue assign. Inline
+      them to literals (`black`→`false`, `red`→`true`) — or `constexpr`/enum that
+      folds — in `map.h`, so the generated AST has `Ebool false/true` (native to
+      `wp`) instead of `Ecast Cl2r (Eglobal …)`. Gap 2 then **disappears with no
+      trusted axiom**.
+  - [ ] Edit `cpp/ddl/map.h`, `make cpp2v` to regenerate the AST, confirm the
+        `Eglobal Node::black/red` reads are gone.
+  - [ ] Drop `wp_operand_read_global_const` + `black_lookup` usage from
+        `InsertSpec.v`; the `curr->color = black` writes become literal stores.
+  - [ ] Add a short **fidelity note** (we verify a source that inlines two
+        trivial named constants; behavior-identical since `Color` *is* `bool`).
+        This is a smaller ask than the current unconstrained-`v` admit.
+- [ ] **A1b** Consolidate any remaining trusted items into `Trusted.v` and add a
+      `Print Assumptions` audit (Makefile `make audit`) so the trusted base is
+      visible in one place and cannot silently grow. After A1-fn + A1-init the
+      base should be just `align_of_function` (or empty, if we also upstream it).
+- [ ] **A1a** *(optional)* File the upstream BRiCk issue for Gap 1's
+      1-alignment axiom (known-sound, unblocks BRiCk-on-BRiCk too; Gap 2 is
+      roadmap-tracked in SkyLabsAI/BRiCk#154 already).
+- [ ] **A1d** Update README trusted-base note to reflect the local closes
+      (Gap 2 eliminated at source; Gap 1 down to one labeled, proven-sound axiom).
 
 ## Phase B — Leaf operations  (depends: A1)
 
