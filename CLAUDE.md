@@ -53,8 +53,39 @@ Only rebuild the real (AST-loaded) file after the scratch closes.
   parse time in a nested tactic — use `assumption`, not `exact H`.
 
 ## Build environment for iteration
-The full pinned toolchain build is ~1 hr (`make setup`). For iteration, a
-prebuilt `.brick-workspace` from a sibling checkout can be symlinked in, and the
-generated AST `.vo` + dependency `.vo` (`RBTree TreeRep WpTactics Tactics`)
-copied into `coq/` so only the target file rebuilds. `.brick-workspace` and all
-`.vo` are gitignored. Remember to `eval $(opam env --switch=<path>/_opam …)`.
+The full pinned toolchain build is ~1 hr (`make setup`); it builds in-repo at
+`./_opam` (opam switch) + `.brick-workspace/_build`. For a faster loop when
+only the target file changes, keep the AST `.vo` + dependency `.vo`
+(`map_int_int_cpp RBTree TreeRep WpTactics Tactics`) compiled in `coq/` so only
+the target rebuilds. `.brick-workspace`, `_opam`, and all `.vo` are gitignored.
+Each new shell: `eval $(opam env --switch=<repo-root> --set-switch)` and put
+`.brick-workspace/_build/install/default/bin` + `/opt/homebrew/opt/llvm@19/bin`
+on PATH.
+
+### Fast goal inspection: preloaded coqtop (~1.4 s), NOT make (~7 min)
+`coqtop` with the AST `.vo` preloaded gives instant goal dumps. Feed it a script
+that `Require`s the AST once, starts the lemma, and prints goals with
+`idtac "TAG:" g` / `Show` between tactics. This is the working fast loop.
+
+### rocq-mcp status (LLM4Rocq/rocq-mcp) — interactive tools BLOCKED as of 2026-07
+Installed via `uv tool install git+https://github.com/LLM4Rocq/rocq-mcp`; a local
+(gitignored) `.mcp.json` launches it under our opam switch + PATH. What works:
+`rocq_health` (reports coqc 9.1.0 / pet 0.2.4), `rocq_compile`. What FAILS: the
+interactive tools (`rocq_start`/`rocq_check`/`rocq_toc`) return "theorem not
+found" / empty toc even on a trivial file — the document never loads.
+Root-cause findings (for whoever picks this up):
+- NOT a pytanque/pet version mismatch: pytanque 0.2.2 (rocq-mcp) and pet 0.2.4
+  have identical `petanque/start` params `{uri,thm,pre_commands,opts}`.
+- `pet` resolves coqlib via `coqlib_dyn` (rocq-lsp `coq/args.ml`): it looks for
+  a binary literally named **`rocq`** on `PATH`, then relocates coqlib beside
+  it. Our `WSBIN` has `rocq`, so a hand-run `pet` with WSBIN on PATH gets PAST
+  the "Can't find file rocq on loadpath" error (it then just wants LSP
+  Content-Length framing). So the CLI coqlib resolution is solvable.
+- BUT rocq-mcp drives `pet-server` (not the `pet` shell) via pytanque, and that
+  path still fails `find_thm` even though `rocq_health` shows WSBIN on the
+  server's PATH. Suspected: pet-server isn't getting our `-R . daedalus_rb`
+  load path (`_CoqProject` is in `coq/`, no `_RocqProject` auto-generated), so
+  the probe document's `Require` fails → 0 sentences → no theorem. Needs reading
+  rocq-mcp's `_set_workspace`/pet-server spawn in `server.py`, or asking the
+  maintainers how coq-lsp/pet-server should be pointed at a dune-workspace
+  load path. Until then, use the preloaded-coqtop loop above.
