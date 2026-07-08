@@ -96,8 +96,8 @@ The script is idempotent — re-running it skips completed steps.
 
 The build produces binaries under `.brick-workspace/_build/install/default/`
 and creates the opam switch at the **repo root** (`./_opam`). The top-level
-`Makefile` points at the binaries directly, but for interactive use (and for
-`rocq-mcp`) you need the switch active in each new shell:
+`Makefile` points at the binaries directly, but for interactive use you need
+the switch active in each new shell:
 
 ```bash
 eval "$(opam env --switch="$PWD" --set-switch)"        # activate ./_opam
@@ -136,40 +136,25 @@ If BRiCk moves forward and you want to update:
 
 ---
 
-## Interactive proof development (rocq-mcp)
+## Interactive proof development (fast goal inspection)
 
-For iterating on proofs, [`rocq-mcp`](https://github.com/LLM4Rocq/rocq-mcp) (an
-MCP server backed by `pet`/coq-lsp) gives an agent instant goal inspection and
-tactic stepping — far faster than the ~7-minute `coqc` rebuild that loading the
-96K-line cpp2v AST otherwise costs. This is a **local dev convenience**, not
-part of the build or release.
-
-Install the server as a global tool:
+Rebuilding a proof file that `Require`s the cpp2v AST costs ~7 minutes (loading
+the 96K-line `map_int_int_cpp.vo`). For iteration, drive `coqtop` with the AST
+`.vo` **preloaded** — it loads once (~6 s cold, ~1.4 s warm) and then reports
+goals instantly:
 
 ```bash
-uv tool install git+https://github.com/LLM4Rocq/rocq-mcp   # → ~/.local/bin/rocq-mcp
+eval "$(opam env --switch="$PWD" --set-switch)"
+COQTOP=.brick-workspace/_build/install/default/bin/coqtop
+COQLIB=.brick-workspace/_build/install/default/lib/coq
+# Feed a script that Requires the AST once, starts the lemma, and prints the
+# goal between tactics with `idtac "TAG:" g` or `Show`.
+$COQTOP -coqlib "$COQLIB" -R coq daedalus_rb
 ```
 
-Then register it in a local (gitignored) `.mcp.json`. The launch must activate
-this repo's opam switch (`./_opam`) and put the workspace binaries (`pet`,
-`coqc`, `cpp2v`) + LLVM 19 on `PATH` — the MCP server does **not** inherit your
-interactive shell:
+See `CLAUDE.md` for the full diagnose-then-fix loop (preloaded coqtop + a
+faithful 3-second scratch that imports only `RBTree`/`TreeRep`/`Tactics`).
 
-```json
-{
-  "mcpServers": {
-    "rocq-mcp": {
-      "command": "/opt/homebrew/bin/opam",
-      "args": ["exec", "--switch=<REPO_ROOT>", "--", "env",
-               "PATH=/opt/homebrew/opt/llvm@19/bin:<REPO_ROOT>/.brick-workspace/_build/install/default/bin:<HOME>/.local/bin:/opt/homebrew/bin:/usr/bin:/bin",
-               "rocq-mcp"],
-      "env": { "ROCQ_WORKSPACE": "<REPO_ROOT>" }
-    }
-  }
-}
-```
-
-`opam exec --switch=…` supplies `OPAM_SWITCH_PREFIX` / `CAML_LD_LIBRARY_PATH`
-(which `pet` needs); the hardcoded `PATH` supplies the binaries. Reconnect the
-MCP client after editing, then `rocq_health` should report Rocq 9.1.0 on the
-`<REPO_ROOT>` switch.
+> An MCP-server route (`LLM4Rocq/rocq-mcp`) was trialled and dropped: its
+> interactive backend wouldn't pick up this repo's `-R . daedalus_rb` load path
+> in the dune-workspace layout. The coqtop loop above is what we use.
