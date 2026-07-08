@@ -36,3 +36,6 @@ lean/build/
 
 # rocq-mcp interactive scratch files
 coq/rocq_mcp_cache_*.v
+
+# Scratch clones for review
+.tmp/
