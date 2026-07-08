@@ -16,6 +16,15 @@ proved to preserve the red-black invariants.
 > partially proved with remaining `admit`s. See
 > [Proof status](#proof-status) below.
 
+> ⚠️ **Health warning — built with AI + human oversight.** This repository
+> (proofs, tactics, models, and docs) was developed by a human working with AI
+> coding assistants. Everything that is claimed complete is *machine-checked* by
+> Rocq/Lean — that is the guarantee you should rely on, not the prose. But the
+> specifications, the `Admitted`/trusted-base claims, and the surrounding
+> documentation have had human review of varying depth and may contain mistakes
+> or over-claims. Read the theorem statements and the trusted base yourself
+> before depending on any result.
+
 ## Repository layout
 
 ```

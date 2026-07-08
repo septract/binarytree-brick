@@ -1,6 +1,8 @@
 # BRiCk workspace (SkyLabsAI/workspace meta-repo, built locally by
-# scripts/setup-brick-workspace.sh)
+# scripts/setup-brick-workspace.sh). Match both a real directory and a symlink
+# pointing at a workspace elsewhere on disk.
 .brick-workspace/
+.brick-workspace
 
 # Local opam switch (created by the setup script)
 _opam/
