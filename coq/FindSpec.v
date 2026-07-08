@@ -125,17 +125,35 @@ Lemma treeR_leaf_implies_null q' (p : ptr) :
   p |-> treeR q' (Leaf (K:=Z) (V:=Z)) |-- [| p = nullptr |].
 Proof. rewrite treeR_leaf _at_as_Rep. auto. Qed.
 
+(** Strengthened spec (H1): the found case now exposes the located node's
+    contents, not just non-nullness.
+
+    - [None]  (key absent): [ret = nullptr] and the whole tree is returned.
+    - [Some v] (key present): [ret] points to a node whose root key is [k] and
+      whose value is [v] — i.e. the pointer genuinely holds the value
+      [findNode] computed. Ownership is a *borrow*: the caller receives the
+      located sub-object plus a magic wand that trades it back for the whole
+      [treeR q t] (findNode returns a borrowed interior pointer, so we cannot
+      hand out both the node and the tree at fraction [q]).
+
+    This is why the precondition is [\pre]/[\post] rather than [\prepost]:
+    the tree is threaded through the postcondition explicitly (directly in the
+    [None] case, via the restore-wand in the [Some] case). *)
 Definition findNode_spec : function_spec :=
   SFunction (cc:=CC_C) (ar:=Ar_Definite) (Tptr _Node) (Tint :: Tptr _Node :: nil)
     (cpp_spec (ar:=Ar_Definite) (Tptr _Node) (Tint :: Tptr _Node :: nil)
       (\arg{k} "k" (Vint k)
        \arg{n} "n" (Vptr n)
-       \prepost{q t} n |-> treeR q t
+       \pre{q t} n |-> treeR q t
        \post{ret}[Vptr ret]
-         [| match findNode k t with
-            | None   => ret = nullptr
-            | Some _ => ret <> nullptr
-            end |])).
+         match findNode k t with
+         | None   => [| ret = nullptr |] ** n |-> treeR q t
+         | Some v =>
+             Exists (c : Color) (l r : tree Z Z),
+               [| ret <> nullptr |] **
+               ret |-> treeR q (Node c l k v r) **
+               (ret |-> treeR q (Node c l k v r) -* n |-> treeR q t)
+         end)).
 
 (** ** Shared continuations for [nd_seq] orderings
 
@@ -174,7 +192,7 @@ Ltac findNode_read_curr_key cv kn_tc :=
 
 (** Innermost continuation: after evaluating both operands of [curr->key < k].
     Case-splits on [kn_tc < k]: go-right or break (key found). *)
-Ltac findNode_after_inner2_eval kn_tc k cv n q t _lp _rp _rc r_tc :=
+Ltac findNode_after_inner2_eval kn_tc k cv n q t _lp _rp _rc c_tc l_tc r_tc :=
   iExists (Vbool (bool_decide (kn_tc < k)%Z));
   iSplit;
   [ wp_eval_int_lt "_hty_k"
@@ -206,7 +224,8 @@ Ltac findNode_after_inner2_eval kn_tc k cv n q t _lp _rp _rc r_tc :=
           iFrame "_ntl Htr_back";
           iFrame "_nrc _ncolor _nkey _nval _nleft _nright _nstruct"
         | iExact "Hcont" ] ]
-    | (* k = kn_tc: break *)
+    | (* k = kn_tc: break — key found. Hand out the located node plus the
+         restore-wand, rather than reconstructing the whole tree. *)
       wp_auto_anon;
       wp_read_local "Hcurr" (Vptr cv);
       iIntros "Hret_store";
@@ -214,30 +233,42 @@ Ltac findNode_after_inner2_eval kn_tc k cv n q t _lp _rp _rc r_tc :=
       wp_destroy_local "Hcurr";
       iNext;
       wp_revert_offset "_nkey";
-      iAssert (n |-> treeR q t)%I
-        with "[Hwand _ntl _ntr _nrc _ncolor _nkey _nval _nleft _nright _nstruct]"
-        as "Htree";
-      [ iApply "Hwand";
-        iExists _lp, _rp, _rc;
-        iFrame "_ntl _ntr _nrc _ncolor _nkey _nval _nleft _nright _nstruct"
-      | iApply ("Hcont" $! cv with "[Htree]");
-        [ iFrame "Htree"; iPureIntro;
-          match goal with Hc : findNode _ _ = findNode _ _ |- _ => rewrite Hc end;
-          simpl;
-          match goal with Hl : bool_decide (k < kn_tc)%Z = false |- _ =>
-            apply bool_decide_eq_false_1 in Hl end;
-          match goal with Hg : bool_decide (kn_tc < k)%Z = false |- _ =>
-            apply bool_decide_eq_false_1 in Hg end;
-          destruct (k <? kn_tc)%Z eqn:E1;
-          [ apply Z.ltb_lt in E1; lia
-          | destruct (kn_tc <? k)%Z eqn:E2;
-            [ apply Z.ltb_lt in E2; lia
-            | assumption ] ]
-        | iFrame "Hret_store"; wp_cleanup_params "Hpk" "Hpn" ] ] ] ].
+      (* From the two failed comparisons, kn_tc = k; substitute so the located
+         node [Node c_tc l_tc kn_tc vn_tc r_tc] has root key [k] and value
+         [vn_tc], matching the [Some vn_tc] postcondition branch. *)
+      match goal with Hl : bool_decide (k < kn_tc)%Z = false |- _ =>
+        apply bool_decide_eq_false_1 in Hl end;
+      match goal with Hg : bool_decide (kn_tc < k)%Z = false |- _ =>
+        apply bool_decide_eq_false_1 in Hg end;
+      assert (kn_tc = k) as Hkeq by lia; subst kn_tc;
+      (* The located node is [Node c_tc l_tc k vn_tc r_tc] — all components are
+         in Ltac scope (threaded as parameters), so we can fold it with concrete
+         witnesses and build the [Some] postcondition without ever exposing a
+         [treeR (Node <evar>)] (which Iris would eagerly unfold and refuse to
+         frame). *)
+      iPoseProof (treeR_node_fold q c_tc l_tc k _ r_tc _lp _rp _rc cv
+        with "[$_ntl $_ntr $_nrc $_ncolor $_nkey $_nval $_nleft $_nright $_nstruct]")
+        as "Hnode";
+      iDestruct (treeR_node_nonnull with "Hnode") as "[Hnode %Hne_cv]";
+      match goal with Hc : findNode _ _ = findNode _ _ |- _ =>
+        rewrite Hc findNode_eq end;
+      iApply ("Hcont" $! cv with "[Hnode Hwand]");
+      [ iExists c_tc, l_tc, r_tc;
+        iSplitR; [ iPureIntro; assumption | ];
+        iSplitL "Hnode"; [ iExact "Hnode" | ];
+        (* Restore-wand. [Hwand]'s LHS is the [_at]-applied unfolding of
+           [treeR (Node …)] (i.e. [∃ lp rp rc, … cv |-> (…)]), whereas the goal
+           has [cv |-> treeR q (Node …)] — where the [treeR] fixpoint may or may
+           not already be reduced to [as_Rep]. Reduce it and apply [_at_as_Rep]
+           so the goal matches [Hwand]. [first] handles both reduction states:
+           if [treeR_node] no longer has a subterm (already reduced), skip it. *)
+        first [ rewrite treeR_node _at_as_Rep | rewrite _at_as_Rep ];
+        iExact "Hwand"
+      | iFrame "Hret_store"; wp_cleanup_params "Hpk" "Hpn" ] ] ].
 
 (** Inner continuation: after evaluating both operands of [k < curr->key].
     Case-splits on [k < kn_tc]: go-left or else-branch (inner comparison). *)
-Ltac findNode_after_inner1_eval kn_tc k cv n q t _lp _rp _rc l_tc r_tc :=
+Ltac findNode_after_inner1_eval kn_tc k cv n q t _lp _rp _rc c_tc l_tc r_tc :=
   iExists (Vbool (bool_decide (k < kn_tc)%Z));
   iSplit;
   [ wp_eval_int_lt "_hty_k"
@@ -276,7 +307,7 @@ Ltac findNode_after_inner1_eval kn_tc k cv n q t _lp _rp _rc l_tc r_tc :=
       wp_binop source
         ltac:(findNode_read_curr_key cv kn_tc)
         ltac:(wp_read_local "Hpk" (Vint k))
-        ltac:(findNode_after_inner2_eval kn_tc k cv n q t _lp _rp _rc r_tc) ] ].
+        ltac:(findNode_after_inner2_eval kn_tc k cv n q t _lp _rp _rc c_tc l_tc r_tc) ] ].
 
 (** Outer continuation: after evaluating both operands of [curr != nullptr].
     Case-splits on [tc]: Leaf (exit loop) or Node (enter body). *)
@@ -297,9 +328,9 @@ Ltac findNode_after_outer_eval cv tc k n q t :=
       [ rewrite treeR_leaf _at_as_Rep; auto
       | iDestruct ("Hwand" with "Htree_leaf") as "Htree";
         iApply ("Hcont" $! nullptr with "[Htree]");
-        [ iFrame "Htree"; iPureIntro;
+        [ (* findNode k t = findNode k Leaf = None: give back the tree *)
           match goal with Hc : findNode _ _ = findNode _ _ |- _ => rewrite Hc end;
-          reflexivity
+          simpl; iSplitR; [ iPureIntro; reflexivity | iExact "Htree" ]
         | iFrame "Hret_store"; wp_cleanup_params "Hpk" "Hpn" ] ] ]
   | (* Node: cv ≠ nullptr, enter loop body *)
     iDestruct (treeR_node_nonnull with "Htree_cv") as "[Htree_cv %Hcv_ne]";
@@ -326,7 +357,7 @@ Ltac findNode_after_outer_eval cv tc k n q t :=
       wp_binop source
         ltac:(wp_read_local "Hpk" (Vint k))
         ltac:(findNode_read_curr_key cv kn_tc)
-        ltac:(findNode_after_inner1_eval kn_tc k cv n q t lp rp rc l_tc r_tc) ] ].
+        ltac:(findNode_after_inner1_eval kn_tc k cv n q t lp rp rc c_tc l_tc r_tc) ] ].
 
 Lemma findNode_ok :
   |-- func_ok source findNode_func findNode_spec.
@@ -364,11 +395,14 @@ Proof using MOD.
         [| findNode k t = findNode k tc |] **
         (cv |-> treeR q tc -* n |-> treeR q t) **
         (Forall ret : ptr,
-          n |-> treeR q t **
-          [| match findNode k t with
-             | Some _ => ret <> nullptr
-             | None => ret = nullptr
-             end |] -*
+          (match findNode k t with
+           | None => [| ret = nullptr |] ** n |-> treeR q t
+           | Some v =>
+               Exists (c : Color) (l r : tree Z Z),
+                 [| ret <> nullptr |] **
+                 ret |-> treeR q (Node c l k v r) **
+                 (ret |-> treeR q (Node c l k v r) -* n |-> treeR q t)
+           end) -*
           Forall ra : ptr,
             pv |-> anyR Tint (cQp.m 1) **
             pv0 |-> anyR (Tptr _Node) (cQp.m 1) **

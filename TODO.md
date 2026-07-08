@@ -125,19 +125,18 @@ Turn `Invariants.v` from scaffold into the capstone.
 
 Independent of the write-path; improves *what the connected specs actually say*.
 
-- [ ] **H1** Strengthen `findNode_spec` (`FindSpec.v`): the found case currently
-      asserts only `ret <> nullptr`. Extend the postcondition so that when
-      `findNode k t = Some v`, the returned pointer satisfies
-      `ret |-> _key |-> intR _ k ** _value |-> intR _ v` (borrowed, matching the
-      `\prepost` fractional ownership) — i.e. the node actually holds the
-      computed key/value. Reprove `findNode_ok`. This is what `Map::lookup`
-      needs anyway.
-  - [ ] H1a Decide the borrowed-ownership shape for the returned node
-        (fraction/observation that composes back into `treeR q t`).
-  - [ ] H1b Thread the value through the loop invariant (currently the
-        invariant only tracks `findNode k t = findNode k tc`; add that a `Some`
-        result pins the located node's fields).
-  - [ ] H1c Reprove `findNode_ok`; update the README "what's connected" note.
+- [x] **H1** Strengthen `findNode_spec` (`FindSpec.v`): DONE. The `Some v` case
+      now returns `∃ c l r, ret |-> treeR q (Node c l k v r) ∗ (that -* n |->
+      treeR q t)` — the located node genuinely holds key `k` and value `v`, as a
+      borrow with a restore-wand (spec switched `\prepost` → `\pre`/`\post`).
+      `findNode_ok` reproved, 0 admit, builds clean.
+  - [x] H1a Ownership shape: borrow the located `treeR q (Node c l k v r)` sub-object
+        + a magic wand trading it back for `n |-> treeR q t` (reuses the loop
+        invariant's existing restore-wand `Hwand`).
+  - [x] H1b Loop-invariant continuation updated to the resource-match
+        postcondition (None: `[|ret=null|] ∗ n|->treeR`; Some: node + wand).
+  - [x] H1c `findNode_ok` reproved; README "what's connected" note should be
+        updated next commit to reflect the now-stronger `findNode` guarantee.
 - [ ] **H2** Add a `Print Assumptions` audit for each top-level `*_ok` theorem
       so the trusted base (the 2 BRiCk gaps, nothing more) is machine-visible
       and can't silently grow. Wire into a `make audit` target.

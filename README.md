@@ -129,7 +129,7 @@ are gitignored.
 | Functional RB-tree spec + invariants | `coq/RBTree.v` | ✅ Complete — 41 `Qed`, 0 `admit` |
 | Representation predicate | `coq/TreeRep.v` | ✅ Complete |
 | Generic wp tactic library | `coq/WpTactics.v` | ✅ Usable (some helper lemmas admitted) |
-| `findNode` refinement | `coq/FindSpec.v` | ✅ Complete — 0 `admit` |
+| `findNode` refinement (full: returns node holding the key/value) | `coq/FindSpec.v` | ✅ Complete — 0 `admit` |
 | `insert` top-level refinement | `coq/InsertSpec.v` | 🟡 `insert_ok` proved modulo admitted callees |
 | `setRebalanceLeft/Right` | `coq/RebalanceSpec.v` | 🟠 WIP — contains `admit`s |
 | `ins` (Löb induction) | `coq/InsSpec.v` | 🟠 WIP — contains `admit`s |
@@ -156,22 +156,21 @@ satisfies `spec`. The `treeR` field layout matches the struct (`ref_count :
 size_t → ulongR`, `color : bool → boolR`, `key/value : int → intR`,
 `left/right → ptrR`). There are **no `Axiom`s** in the proof files.
 
-Two honest limits on that connection today:
+One honest limit on that connection today:
 
-1. **Results are conditional on module well-formedness.** Every theorem is
-   proved under a section hypothesis that the driver translation unit is
-   well-formed (`map_int_int_cpp.source ⊧ σ`, and for the insert path
-   `|-- denoteModule source`). These are standard, dischargeable BRiCk side
-   conditions, but nothing in the repo discharges them yet — so the theorems
-   currently read "*if* the module is well-formed, *then* the C++ refines its
-   spec." Closing this is part of the Phase G capstone.
+- **Results are conditional on module well-formedness.** Every theorem is
+  proved under a section hypothesis that the driver translation unit is
+  well-formed (`map_int_int_cpp.source ⊧ σ`, and for the insert path
+  `|-- denoteModule source`). These are standard, dischargeable BRiCk side
+  conditions, but nothing in the repo discharges them yet — so the theorems
+  currently read "*if* the module is well-formed, *then* the C++ refines its
+  spec." Closing this is part of the Phase G capstone.
 
-2. **`findNode_spec` is deliberately partial.** It proves the C++ returns
-   `nullptr` **iff** the key is absent (so `contains` is correct), but in the
-   found case it only asserts `ret <> nullptr` — it does *not* yet expose that
-   the returned node holds the value `findNode` computed. (`ins_spec` /
-   `insert_spec`, by contrast, pin down the entire resulting tree, values
-   included.) Strengthening it is tracked in [`TODO.md`](TODO.md).
+`findNode_spec` is now a *full* functional guarantee: on a hit it returns a
+pointer to a node that genuinely holds the searched key and the computed value
+(as a borrow with a restore-wand), and on a miss it returns `nullptr` — not
+merely a non-null/null flag. (`ins_spec` / `insert_spec` likewise pin down the
+entire resulting tree, values included.)
 
 ## Roadmap
 
