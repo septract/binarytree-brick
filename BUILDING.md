@@ -51,12 +51,17 @@ The exact known-good commits are pinned in
 On macOS (Homebrew):
 
 ```bash
-brew install opam cmake llvm gnu-sed bash
+brew install opam cmake llvm@19 gnu-sed bash
 ```
 
+> **Use LLVM 19 specifically, and put it first on `PATH` for the build:**
+> ```bash
+> export PATH="/opt/homebrew/opt/llvm@19/bin:$PATH"
+> ```
 > Apple Clang will **not** work — `cpp2v` needs the `libclang` development
-> headers that only the Homebrew/LLVM `clang` ships. Make sure the Homebrew
-> `clang` is ahead of Apple's on your `PATH`.
+> headers that only the Homebrew/LLVM `clang` ships. The workspace also rejects
+> **too-new** clang: it requires `18 ≤ version < 22`, so the current Homebrew
+> `llvm` (22.x) fails the check — hence `llvm@19`.
 
 On Debian/Ubuntu: install `opam cmake clang-19 libclang-19-dev` and ensure a
 recent `bash` and GNU `sed` (both are default).
@@ -70,6 +75,7 @@ make check
 ### 2. Build the toolchain (~30–60 min, first run only)
 
 ```bash
+export PATH="/opt/homebrew/opt/llvm@19/bin:$PATH"   # LLVM 19 must be first
 make setup
 ```
 
@@ -88,13 +94,20 @@ The script is idempotent — re-running it skips completed steps.
 
 ### 3. Activate the toolchain
 
-The build produces binaries under `.brick-workspace/_build/install/default/`.
-The top-level `Makefile` points at them directly, but you still need the opam
-environment on your `PATH` in each new shell:
+The build produces binaries under `.brick-workspace/_build/install/default/`
+and creates the opam switch at the **repo root** (`./_opam`). The top-level
+`Makefile` points at the binaries directly, but for interactive use (and for
+`rocq-mcp`) you need the switch active in each new shell:
 
 ```bash
-source .brick-workspace/dev/activate.sh
+eval "$(opam env --switch="$PWD" --set-switch)"        # activate ./_opam
+export PATH="/opt/homebrew/opt/llvm@19/bin:.brick-workspace/_build/install/default/bin:$PATH"
 ```
+
+> Do **not** `source .brick-workspace/dev/activate.sh` — it runs a bare
+> `eval $(opam env)` that resolves to your *default* opam switch, not this
+> repo's `./_opam`, and the build/tools then fail to find libraries
+> (e.g. `Library "camlzip" not found`) even though they are installed here.
 
 ### 4. Generate the AST and build the proofs
 
@@ -120,3 +133,43 @@ If BRiCk moves forward and you want to update:
 3. once the proofs still go through, capture the new commits:
    `git -C .brick-workspace/fmdeps/BRiCk rev-parse HEAD` (etc.) into
    `scripts/pins.env`.
+
+---
+
+## Interactive proof development (rocq-mcp)
+
+For iterating on proofs, [`rocq-mcp`](https://github.com/LLM4Rocq/rocq-mcp) (an
+MCP server backed by `pet`/coq-lsp) gives an agent instant goal inspection and
+tactic stepping — far faster than the ~7-minute `coqc` rebuild that loading the
+96K-line cpp2v AST otherwise costs. This is a **local dev convenience**, not
+part of the build or release.
+
+Install the server as a global tool:
+
+```bash
+uv tool install git+https://github.com/LLM4Rocq/rocq-mcp   # → ~/.local/bin/rocq-mcp
+```
+
+Then register it in a local (gitignored) `.mcp.json`. The launch must activate
+this repo's opam switch (`./_opam`) and put the workspace binaries (`pet`,
+`coqc`, `cpp2v`) + LLVM 19 on `PATH` — the MCP server does **not** inherit your
+interactive shell:
+
+```json
+{
+  "mcpServers": {
+    "rocq-mcp": {
+      "command": "/opt/homebrew/bin/opam",
+      "args": ["exec", "--switch=<REPO_ROOT>", "--", "env",
+               "PATH=/opt/homebrew/opt/llvm@19/bin:<REPO_ROOT>/.brick-workspace/_build/install/default/bin:<HOME>/.local/bin:/opt/homebrew/bin:/usr/bin:/bin",
+               "rocq-mcp"],
+      "env": { "ROCQ_WORKSPACE": "<REPO_ROOT>" }
+    }
+  }
+}
+```
+
+`opam exec --switch=…` supplies `OPAM_SWITCH_PREFIX` / `CAML_LD_LIBRARY_PATH`
+(which `pet` needs); the hardcoded `PATH` supplies the binaries. Reconnect the
+MCP client after editing, then `rocq_health` should report Rocq 9.1.0 on the
+`<REPO_ROOT>` switch.

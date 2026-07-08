@@ -30,3 +30,6 @@ lean/build/
 
 # macOS
 .DS_Store
+
+# Local MCP client config (machine-specific absolute paths; see BUILDING.md)
+.mcp.json
