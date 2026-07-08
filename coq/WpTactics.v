@@ -786,6 +786,43 @@ Proof.
   iApply ("Hconv" with "Hwp").
 Qed.
 
+(** ** Function-type alignment (closes BRiCk Gap 1)
+
+    C++ leaves the alignment of a *function type* undefined (`alignof`/`sizeof`
+    on a function type are ill-formed — [expr.alignof]/[expr.sizeof]), so BRiCk
+    sets [size_of (Tfunction) = None] and provides no [align_of] axiom for
+    functions. That missing fact is the sole thing blocking a global-function
+    callee from being resolved (see [wp_operand_cfun2ptr_global] below).
+
+    We supply it as [align_of (Tfunction ..) = Some 1]. This is SOUND: nothing
+    else constrains [align_of] of a function ([align_of_size_of'] is guarded by
+    [size_of = Some _], vacuous here), and [aligned_ptr 1 p] holds for every [p]
+    ([aligned_ptr_min]). It is the BRiCk authors' own proposed "option 1"
+    (wp.v: "functions have 1 alignment"). This is the ONE axiom the write-path
+    proofs rest on; keep it visible via [Print Assumptions]. *)
+Axiom align_of_function : forall (ft : function_type),
+  align_of (Tfunction ft) = Some 1%N.
+
+(** Any pointer is suitably aligned for a function type (given the axiom). *)
+Lemma aligned_ptr_ty_function (ft : function_type) (p : ptr) :
+  aligned_ptr_ty (Tfunction ft) p.
+Proof.
+  unfold aligned_ptr_ty. exists 1%N. split; [ apply align_of_function | apply aligned_ptr_min ].
+Qed.
+
+(** From [strict_valid_ptr] alone, build [reference_to] at a function type —
+    exactly what [read_decl] demands for a global-function callee. The compiled
+    function's [code_at] supplies the [strict_valid_ptr]. *)
+Lemma reference_to_function (ft : function_type) (p : ptr) :
+  strict_valid_ptr p |-- reference_to (Tfunction ft) p.
+Proof.
+  iIntros "#Hsv".                 (* strict_valid_ptr is persistent *)
+  iApply (reference_to_intro with "Hsv").
+  rewrite has_type_ptr'.
+  iSplitR; [ iApply (strict_valid_valid with "Hsv") | ].
+  iPureIntro. apply aligned_ptr_ty_function.
+Qed.
+
 (** Resolve [wp_operand (Ecast Cfun2ptr (Eglobal name ty)) Q] from [denoteModule].
 
     Combines [wp_operand_cast_fun2ptr_cpp] (Cfun2ptr cast axiom) +
