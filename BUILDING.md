@@ -83,7 +83,9 @@ This runs [`scripts/setup-brick-workspace.sh`](scripts/setup-brick-workspace.sh)
 which:
 
 1. Clones `SkyLabsAI/workspace` into `.brick-workspace/` (gitignored),
-2. Clones its **public** sub-repos (`make clone-public`),
+2. Clones its **public** sub-repos over anonymous **HTTPS**
+   (`make clone-public GITHUB_URL=https://github.com/`) — no SSH keys or
+   SkyLabsAI credentials required,
 3. Checks out the pinned commits from `scripts/pins.env`
    (the workspace tracks moving branch heads, so pinning is what makes the
    build reproducible),

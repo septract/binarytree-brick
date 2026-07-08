@@ -121,8 +121,11 @@ fi
 
 cd "$WORKSPACE_DIR"
 
-log "Cloning public sub-repositories (make clone-public)"
-make clone-public -j
+log "Cloning public sub-repositories (make clone-public, over HTTPS)"
+# The workspace defaults GITHUB_URL to `git@github.com:` (SSH). All the repos we
+# need are PUBLIC, so force anonymous HTTPS — no SSH keys / SkyLabsAI
+# credentials required. This is what makes the build reproducible for anyone.
+make clone-public -j GITHUB_URL="https://github.com/"
 
 apply_pins
 
