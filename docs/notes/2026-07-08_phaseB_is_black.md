@@ -83,3 +83,55 @@ Write `coq/InsSpecB.v` (or add to a scratch) proving `is_black_ok` against
 `InsertDefs`. Instrument with `idtac` after `wp_func_intro` + arg-extract +
 stepping `Sreturn_val`, ONE build to capture the `Eseqor` goal, then iterate.
 Budget several AST builds; do NOT guess.
+
+## CAPTURED GOAL (2026-07-08 build) — is_black_ok, after prologue + wp_auto
+Prologue that works (arg extraction verified):
+```coq
+rewrite /func_ok. iSplit.
+- iPureIntro. reflexivity.
+- iIntros "!>" (Q vals) "Hspec". iPoseProof MODULE as "#HMOD".
+  iApply wp_func_intro. rewrite /is_black_func /=.
+  iDestruct "Hspec" as (pn vn) "(%Hvals & Hpn & Hspec)". subst vals. simpl.
+  iDestruct "Hspec" as (n_ptr c_opt) "(%Hargs & Hpre & Hcont)".
+  injection Hargs as ->. subst. wp_auto.
+```
+Resulting goal (context + goal):
+- `HMOD : denoteModule source` (persistent)
+- `Hpn : pn |-> tptsto_fuzzyR (Tptr _Node) 1$m (Vptr n_ptr)`
+- `Hpre : match c_opt with Some c => ∃q, n_ptr |-> (_color|->boolR q (color_to_bool c) ∗ structR _Node_name q) | None => [| n_ptr = nullptr |] end`
+- `Hcont : ∀ _:ptr, (Hpre-shape ∗ emp) -∗ ∀ x, pn|->anyR (Tptr _Node) 1$m ∗ x|->tptsto_fuzzyR "bool" 1$m (Vbool (match c_opt with Some Red=>false|_=>true end)) -∗ Q x`
+- GOAL: `∀ p, wp_operand source (Rbind "n" pn (Remp None None "bool"))
+    (Eseqor (Ebinop Beq (Cl2r (Evar "n")) (Cnull2ptr Enull) "bool")
+            (Ebinop Beq (Cintegral "int" (Cl2r (Emember true (Cl2r (Evar "n")) color)))
+                        (Cintegral "int" (Ebool false)) "bool")) K`
+
+## PROOF PLAN (next session — do NOT re-guess the prologue, it's above)
+1. `iIntros (p)`.
+2. `iApply wp_operand_seqor` → `wp_test` on LHS `n == nullptr`; if true return
+   `Vbool true`, else `wp_test` RHS.
+3. Case split `destruct c_opt as [c|]`:
+   - None: `Hpre : n_ptr = nullptr`; subst. LHS `n==nullptr` evaluates true
+     (needs pointer-`Beq` eval `eval_eq` (operator.v:351) + reading `n` local
+     from `pn`/`Hpn`). Short-circuit → `Q p` with `Vbool true`; discharge via
+     `Hcont` (None branch wants `Vbool true` ✓).
+   - Some c: LHS false — need `n_ptr <> nullptr` from `structR`'s `nonnullR`
+     (cf. `treeR_node_nonnull`). Then RHS: read `n->color` (boolR → value
+     `color_to_bool c`), two `Cintegral "int"` casts via
+     `wp_operand_cast_integral` + `conv_int` (cast.v:32) mapping bool→{0,1},
+     integer `Beq` via `eval_eq`. Result `= (color_to_bool c =? 0)` i.e.
+     `Vbool (negb (color_to_bool c))`? — CHECK: is_black is true when color is
+     black(=false); `(int)color == (int)false` = `color==false`. For c=Black
+     color_to_bool=false → true ✓; c=Red → false ✓. Matches Hcont's
+     `Some Red=>false|_=>true`.
+4. Discharge `Hcont` with `pn|->anyR` (from Hpn via tptsto→any) + the bool result.
+
+## Rules still to pin (grep targets)
+- `wp_test` unfold: it's likely `WPE.wp_test`; grep `wp_test` in
+  `logic/wp.v` / `logic/wpe.v` (it appeared "Unfold WPE.wp_test" in seqor).
+- pointer `Beq`/null eval: `eval_eq` (operator.v:351) + how FindSpec does
+  `wp_eval_ptr_neq_null` / `wp_null_val` (REUSE those tactics from FindSpec!).
+- `conv_int` bool→int: `cast.v:32`; find the constructor/lemma giving
+  `conv_int tu Tbool Tint (Vbool b) (Vint (if b then 1 else 0))`.
+- FindSpec.v already evaluates `k < curr->key` and `curr != nullptr` — its
+  `findNode_after_*` tactics and `wp_eval_int_lt`/`wp_eval_ptr_neq_*` are close
+  templates for the Beq/compare steps here.
