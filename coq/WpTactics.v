@@ -49,9 +49,8 @@
 
     - [code_at_of_denoteModule] — Extract [code_at] from [denoteModule] via symbol lookup.
     - [wp_fptr_of_func_ok] — Compose [code_at] + [func_ok] → [wp_fptr].
-    - [wp_operand_cfun2ptr_global] — Resolve [Ecast Cfun2ptr (Eglobal name ty)] (Admitted: BRiCk gap).
-    - [wp_operand_read_global_const] — Resolve [Ecast Cl2r (Eglobal name qty)] for const globals (Admitted: BRiCk gap).
-    - [wp_read_global_const HMOD lookup v] — Read a global const variable.
+    - [wp_operand_cfun2ptr_global] — Resolve [Ecast Cfun2ptr (Eglobal name ty)]
+      (proved, using the sound [align_of_function] axiom; BRiCk Gap 1).
     - [wp_resolve_call HMOD lookup body fname] — Resolve [Ecall] through [cfun2ptr_global] to [wp_fptr].
     - [wp_call_direct HMOD lookup body func_ok] — One-liner for call sites.
     - [wp_arg_prim eval_operand] — Evaluate one [wp_arg] for a primitive type.
@@ -866,75 +865,14 @@ Proof.
   iApply (code_at_of_denoteModule tu f name Hlookup Hbody with "HMOD").
 Qed.
 
-(** Resolve [wp_operand (Ecast Cl2r (Eglobal name qty)) Q] for const globals.
-
-    When C++ code reads a global const (e.g. [Node::black]), the wp goal is:
-<<
-      wp_operand tu ρ (Ecast Cl2r (Eglobal name qty)) Q
->>
-    This lemma resolves it from [denoteModule tu] and a symbol table lookup.
-
-    == Why this is Admitted ==
-
-    For global variables, [denoteModule] provides only [svalidR] (location
-    validity) via [denoteSymbol], not the initialized value.  The path to
-    the value requires [initializedR] at the global's address, but
-    [initSymbol] returns [emp] with an explicit TODO in [translation_unit.v]:
-<<
-      (* ^^ todo(gmm): static initialization is not yet supported *)
->>
-    The [wp_operand_cast_l2r] axiom needs [initializedR] to extract the
-    value, which cannot be derived from [svalidR] alone.
-
-    This is the same class of BRiCk framework gap as [wp_operand_cfun2ptr_global]
-    (function alignment — above) and will become provable when BRiCk
-    implements static initialization support.
-
-    The [init] parameter documents the initializer found in the symbol table
-    (verified by [lookup_proof]) without enforcing it (since [initSymbol]
-    is [emp]).
-
-    Proof sketch (blocked at step 4):
-    1. [wp_operand_cast_l2r] → [wp_glval] → [wp_lval_global] → [read_decl]
-    2. [read_decl] (non-ref case) → [reference_to (erase_qualifiers qty) (_global name)]
-    3. [denoteModule_denoteSymbol] + lookup → [svalidR] → [strict_valid_ptr] → [reference_to] ✓
-    4. BLOCKED: [wp_operand_cast_l2r] needs [initializedR], but [denoteModule]
-       only provides [svalidR] ✗ *)
-Lemma wp_operand_read_global_const (tu : translation_unit)
-    (ρ : region) (name : obj_name) (qty : type) (init : global_init.t)
-    (v : val) (Q : val -> FreeTemps -> mpred) :
-  tu.(symbols) !! name = Some (Ovar qty init) ->
-  denoteModule tu ** Q v FreeTemps.id
-  |-- wp_operand tu ρ (Ecast Cl2r (Eglobal name qty)) Q.
-Proof. Admitted.
+(* NOTE: BRiCk Gap 2 (static-init global-const reads) previously lived here as
+   an [Admitted] lemma [wp_operand_read_global_const] plus a [wp_read_global_const]
+   tactic, used only to read [Node::black]/[red]. That gap is now closed *at the
+   source*: those constants are inlined to literals in [cpp/ddl/map.h] (see the
+   NOTE there / TODO A1-init), so no static-const global read is generated and
+   no admit is needed. The lemma and tactic have been removed. *)
 
 End wp_call_lemmas.
-
-(** Read a global const variable.
-
-    Resolves [wp_operand (Ecast Cl2r (Eglobal name qty)) Q] for a global
-    const (e.g. [Node::black]).  Uses [wp_operand_read_global_const]
-    (Admitted) to rewrite the goal, then frames [denoteModule] from [HMOD].
-
-    Uses [rewrite] instead of [iApply] because the Coq unifier cannot
-    resolve the continuation evar [?Q] through [iApply]'s higher-order
-    matching when the continuation is complex (e.g. from [eval2] unfolding).
-    [rewrite] handles the matching directly at the term level.
-
-    [HMOD] names the persistent hypothesis holding [denoteModule tu].
-    [lookup_lemma] proves [tu.(symbols) !! name = Some (Ovar qty init)].
-    [v] is the runtime value of the constant (e.g. [Vbool false]).
-
-    After the tactic, the goal is the continuation [Q v FreeTemps.id].
-
-    Usage:
-<<
-      wp_read_global_const "HMOD" black_lookup (Vbool false).
->>
-*)
-Ltac wp_read_global_const HMOD lookup_lemma v :=
-  rewrite -(wp_operand_read_global_const _ _ _ _ _ v _ lookup_lemma);
-  iSplitL HMOD; [iExact HMOD |].
 
 (** Resolve [wp_operand ... (Ecall (Ecast Cfun2ptr (Eglobal name ty)) args) Q].
 

@@ -110,9 +110,10 @@ Definition is_red_name : obj_name :=
       (Tptr (Qconst _Node) :: nil)).
 #[local] Close Scope pstring_scope.
 
-(** ** Node::black (global const) *)
-
-Definition black_name : obj_name := Nscoped _Node_name (Nid "black").
+(* NOTE: [black_name]/[black_lookup] (for reading [Node::black] as a global
+   const) were removed — the constant is now inlined to a literal in
+   [cpp/ddl/map.h] (BRiCk Gap 2 / TODO A1-init), so it is never read as a
+   global and no lookup lemma is needed. *)
 
 (* ================================================================= *)
 (** * Function Extraction Helper *)
@@ -184,11 +185,6 @@ Proof. native_compute. reflexivity. Qed.
 
 Lemma is_red_lookup :
   source.(symbols) !! is_red_name = Some (Ofunction is_red_func).
-Proof. native_compute. reflexivity. Qed.
-
-Lemma black_lookup :
-  source.(symbols) !! black_name =
-    Some (Ovar (Qconst Tbool) (global_init.Init (Ebool false))).
 Proof. native_compute. reflexivity. Qed.
 
 (** Machine-checked proofs that functions have bodies.  Required by
