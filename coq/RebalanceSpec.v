@@ -64,6 +64,8 @@ Require Import daedalus_rb.RBTree.
 Require Import daedalus_rb.TreeRep.
 Require Import daedalus_rb.Tactics.
 Require Import daedalus_rb.InsertDefs.
+(* Real is_black_ok / is_red_ok proofs (InsertDefs.v has only Admitted stubs). *)
+Require Import daedalus_rb.IsBlackSpec.
 
 (* ================================================================= *)
 (** * Pure helper lemmas (outside Section — no cpp_logic context) *)

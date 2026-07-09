@@ -130,7 +130,8 @@ $(COQ_DIR)/IsBlackSpec.vo: $(COQ_DIR)/IsBlackSpec.v $(COQ_DIR)/RBTree.vo $(COQ_D
 	$(COQC) $(COQFLAGS) $<
 
 # Phase 5B: setRebalanceLeft_ok + setRebalanceRight_ok
-$(COQ_DIR)/RebalanceSpec.vo: $(COQ_DIR)/RebalanceSpec.v $(COQ_DIR)/InsertDefs.vo $(COQ_DIR)/Tactics.vo
+# (uses the real is_black_ok/is_red_ok from IsBlackSpec, not InsertDefs stubs)
+$(COQ_DIR)/RebalanceSpec.vo: $(COQ_DIR)/RebalanceSpec.v $(COQ_DIR)/InsertDefs.vo $(COQ_DIR)/Tactics.vo $(COQ_DIR)/IsBlackSpec.vo
 	$(COQC) $(COQFLAGS) $<
 
 # Phase 5B: ins_ok (Löb induction, depends on rebalance specs)
