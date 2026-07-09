@@ -1057,6 +1057,80 @@ Ltac wp_nd_args eval_operand :=
   repeat (wp_nd_args_step eval_operand);
   try rewrite /wp.WPE.Mret /=.
 
+(** Resolve a direct call [f((const T ptr) local)] in OPERAND position (i.e. the
+    call is a sub-expression being evaluated, as in an [Eseqand]/[Eseqor] guard
+    or an [Eunop] operand), down to the callee's [fs_spec] precondition.
+
+    This is the operand-context analogue of the statement-context call flow
+    ([wp_resolve_call] + [wp_nd_args] + [wp_call_direct]).  It differs in three
+    ways that [wp_resolve_call] can't handle here:
+    - the callee expression name is INFERRED from the goal's raw [Eglobal] term
+      (passing the folded [obj_name] blocks keyed unification);
+    - the single argument is a [(const T ptr)] value carrying a [Cnoop] const-cast
+      whose [has_type] side-goal is discharged from a [structR]/[reference_to]
+      hypothesis;
+    - the call-site function type carries [to_arg_type]/[merge_tq QM] residue and
+      is reconciled with [type_of_value (Ofunction func_def)] by [vm_compute]
+      (not [change], which needs syntactic convertibility).
+
+    Arguments:
+    - [HMOD]      persistent hyp holding [denoteModule tu]
+    - [lookup]    [tu.(symbols) !! name = Some (Ofunction func_def)]
+    - [body]      [exists b, func_def.(f_body) = Some b]
+    - [fname]     the callee [obj_name] (used only to instantiate the fn pointer)
+    - [fok]       the callee's [|-- func_ok tu func_def spec] (fully applied)
+    - [func_def]  the callee [Func] term
+    - [H_local]   hyp holding [tptsto_fuzzyR (Tptr _) _ (Vptr p)] for the arg local
+    - [vp]        the argument pointer value [Vptr p]
+    - [H_struct]  hyp holding [p |-> structR cls _] (for the [has_type] discharge)
+
+    After the tactic the goal is [spec.(fs_spec) [argp] Q] — provide the callee's
+    precondition next (arg + ghosts + resources), exactly as for a statement call.
+
+    Leaves the [reference_to] facts as [_rt]/[_val]/[_align]/[_nn] and the code_at
+    /func_ok as [_call_ca]/[_call_fok] in context. *)
+Ltac wp_operand_call_direct1 HMOD lookup body fname fok func_def H_local vp H_struct :=
+  iApply wp_operand_call;
+    rewrite /wp_call /=;
+    iIntros "%_";
+    rewrite /wp.WPE.Mbind /wp.WPE.Mmap /=;
+  iApply wp_operand_cfun2ptr_global; [ exact lookup | exact body | ];
+  iSplitL HMOD; [ iExact HMOD | ];
+  iExists (_global fname);
+  iSplit; [ iPureIntro; reflexivity | ];
+  rewrite /wp.WPE.nd_seqs /=;
+  iIntros (? ? ?) "%Hndeq";
+  (match goal with Hndeq : _ = ?pre ++ _ :: _ |- _ =>
+     destruct pre as [| ?x0 [| ?x1 ?rest]]; simpl in Hndeq; try congruence
+   end);
+  (match goal with Hndeq : _ = _ |- _ =>
+     injection Hndeq; clear Hndeq; intros; subst; simpl
+   end);
+  rewrite /wp.WPE.Mbind /call.wp_arg /=;
+  iIntros (?);
+  rewrite /wp_initialize /qual_norm /=;
+  try rewrite wp_initialize_unqualified.unlock /=;
+  iApply wp_operand_cast_noop;
+  wp_read_local H_local vp;
+  iDestruct (observe (reference_to _ _) with H_struct) as "#_rt";
+  iDestruct (reference_to_elim with "_rt") as "(%Halign & %Hnn & #_val & _)";
+  iSplitR;
+  [ rewrite has_type_ptr';
+    iSplitR; [ iApply "_val" | ];
+    iPureIntro; rewrite aligned_ptr_ty_erase_qualifiers /=; assumption
+  | ];
+  iIntros "Hargp";
+  rewrite /wp.WPE.Mmap /wp.WPE.Mret /=;
+  iNext;
+  iPoseProof (code_at_of_denoteModule _ _ _ lookup body with HMOD) as "#_call_ca";
+  iPoseProof fok as "#_call_fok";
+  (match goal with |- context[wp_fptr _ ?ft _ _ _] =>
+     replace ft with (type_of_value (Ofunction func_def)) by (vm_compute; reflexivity)
+   end);
+  iApply (wp_fptr_of_func_ok_compat _ _ _ _ _ _ (tu_compat));
+  iSplitR; [ iExact "_call_ca" | ];
+  iSplitR; [ iExact "_call_fok" | ].
+
 (* ================================================================= *)
 (** ** Layer 3: Meta-Tactics *)
 (* ================================================================= *)

@@ -184,53 +184,16 @@ Proof using MOD MODULE.
       rewrite /wp.WPE.wp_test /=.
       iApply wp_operand_seqand.
       rewrite /wp.WPE.wp_test /=.
-      iApply wp_operand_call;
-        rewrite /wp_call /=;
-        iIntros "%_";
-        rewrite /wp.WPE.Mbind /wp.WPE.Mmap /=.
-      iApply wp_operand_cfun2ptr_global; [ exact is_black_lookup | exact is_black_has_body | ].
-      iSplitL "HMOD"; [ iExact "HMOD" |].
-      iExists (_global is_black_name).
-      iSplit; [ iPureIntro; reflexivity |].
-      rewrite /wp.WPE.nd_seqs /=.
-      iIntros (pre post q) "%Hnd".
-      destruct pre as [| ?x0 [| ?x1 ?rest]]; simpl in Hnd; try congruence.
-      injection Hnd; clear Hnd; intros; subst; simpl.
-      rewrite /wp.WPE.Mbind /call.wp_arg /=.
-      iIntros (argp).
-      rewrite /wp_initialize /qual_norm /=.
-      try rewrite wp_initialize_unqualified.unlock /=.
-      iApply wp_operand_cast_noop.
-      wp_read_local "Hpn" (Vptr n_ptr).
-      iDestruct (observe (reference_to _ n_ptr) with "Hstruct") as "#_rt".
-      iDestruct (reference_to_elim with "_rt") as "(%_align & %_nn & #_val & _)".
-      iSplitR.
-      { rewrite has_type_ptr'.
-        iSplitR; [ iApply "_val" |].
-        iPureIntro. rewrite aligned_ptr_ty_erase_qualifiers /=. exact _align. }
-      iIntros "Hargp".
-      rewrite /wp.WPE.Mmap /wp.WPE.Mret /=.
-      iNext.
-      iPoseProof (code_at_of_denoteModule _ _ _ is_black_lookup is_black_has_body
-        with "HMOD") as "#_call_ca".
-      iPoseProof (is_black_ok MODULE) as "#_call_fok".
-      (** Apply [wp_fptr_of_func_ok] directly; the goal's call-site function type
-          equals [type_of_value (Ofunction is_black_func)] up to qualifier
-          normalization (both go through [to_arg_type]/[normalize_type]), so
-          replace it by [vm_compute] rather than [change] (which needs syntactic
-          convertibility and fails on the [merge_tq QM] residue). *)
-      match goal with |- context[wp_fptr _ ?ft _ _ _] =>
-        replace ft with (type_of_value (Ofunction is_black_func))
-          by (vm_compute; reflexivity)
-      end.
-      iApply (wp_fptr_of_func_ok_compat _ _ _ _ _ _ (tu_compat)).
-      iSplitR; [ iExact "_call_ca" |].
-      iSplitR; [ iExact "_call_fok" |].
+      (** Evaluate the guard's first operand [is_black(n)] (arg cast to const
+          Node ptr) as a direct call to [is_black_ok], down to its precondition. *)
+      wp_operand_call_direct1 "HMOD" is_black_lookup is_black_has_body
+        is_black_name (is_black_ok MODULE) is_black_func
+        "Hpn" (Vptr n_ptr) "Hstruct".
       (** Provide [is_black_spec] precond: arg [argp]→[n_ptr], ghost [Some Red],
           resources [Hcolor]+[Hstruct] assembled into the [_color ∗ structR]
           conjunct; received back (read-only) in the post. *)
       rewrite /is_black_spec /=.
-      iExists argp, (Vptr n_ptr).
+      iExists _, (Vptr n_ptr).
       iSplit; [ iPureIntro; reflexivity |].
       iSplitL "Hargp"; [ iFrame "Hargp" |].
       iExists n_ptr, (Some Red), (cQp.m 1).
