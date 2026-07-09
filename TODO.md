@@ -72,11 +72,23 @@ upstream filing (A1a) becomes optional/nice-to-have.
 
 Smallest real callees; validate the call machinery.
 
-- [ ] **B1a** Prove `is_black_ok` (`InsertDefs.v` spec already stated):
-      null-check + `n->color` read, return `option Color` result.
-- [ ] **B1b** Prove `is_red_ok` (negation of `is_black`; same ownership).
-- [ ] **B1c** Factor any shared "read `_color` field via const ptr" tactic
-      into `Tactics.v`.
+- [x] **B1a** Prove `is_black_ok` — **DONE** (`coq/IsBlackSpec.v`, `Qed`, 0
+      admit). `Eseqor` short-circuit + `c_opt` case split; pointer `Beq` both
+      ways (`eval_ptr_self_eq`, `eval_ptr_nullptr_eq_l`); `wp_operand_cast_integral`
+      + `conv_int` (bool→int keeps bool) + integer `eval_eq` for the promoted
+      `(int)color == (int)false`; both `nd_seq` orders via existing `wp_binop`.
+      `Print Assumptions` shows only `align_of_function` (+ std BRiCk axioms).
+- [x] **B1b** Prove `is_red_ok` — **DONE** (`coq/IsBlackSpec.v`, `Qed`, 0 admit).
+      First proof that *calls* a verified callee: resolves the direct
+      `is_black(n)` call via `wp_operand_call` → `wp_operand_cfun2ptr_global`
+      (name inferred from the goal, not the folded `is_black_name`) →
+      `wp_call_direct` with `is_black_ok`; then `Eunop Unot` via `eval_not_bool`.
+      `negb (is_black …)` reduces to the `is_red` postcondition literal.
+- [ ] **B1c** Factor shared tactics into the library: (a) an operand-context
+      direct-call resolver (the `wp_resolve_call` variant that infers the callee
+      name — `wp_resolve_call` forces the folded name and fails here); (b) the
+      `Cintegral`+bool-`Beq` compare; (c) generic `wp_open_func` prologue. Extract
+      once a 2nd same-shape use lands (per CLAUDE.md).
 
 ## Phase C — Rotations  (depends: B1; rotation bodies also need D1)
 

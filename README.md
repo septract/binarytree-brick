@@ -42,6 +42,7 @@ proved to preserve the red-black invariants.
 │   ├── FindSpec.v              #   findNode refinement proof (complete)
 │   ├── InsertDefs.v            #   AST function extractions + specs (cached layer)
 │   ├── InsertSpec.v            #   insert refinement proof
+│   ├── IsBlackSpec.v           #   is_black / is_red leaf-callee proofs (complete)
 │   ├── RebalanceSpec.v         #   setRebalanceLeft/Right proofs (WIP)
 │   ├── InsSpec.v               #   ins proof via Löb induction (WIP)
 │   ├── RefCount.v              #   reference-counting correctness (ghost state)
@@ -131,6 +132,7 @@ are gitignored.
 | Generic wp tactic library | `coq/WpTactics.v` | ✅ Complete (rests on the one `align_of_function` axiom; no admits) |
 | `findNode` refinement (full: returns node holding the key/value) | `coq/FindSpec.v` | ✅ Complete — 0 `admit` |
 | `insert` top-level refinement | `coq/InsertSpec.v` | 🟡 `insert_ok` proved modulo admitted callees |
+| `is_black` / `is_red` refinement | `coq/IsBlackSpec.v` | ✅ Complete — both `Qed`, 0 `admit` |
 | `setRebalanceLeft/Right` | `coq/RebalanceSpec.v` | 🟠 WIP — contains `admit`s |
 | `ins` (Löb induction) | `coq/InsSpec.v` | 🟠 WIP — contains `admit`s |
 | Reference counting | `coq/RefCount.v` | 🔲 Scaffolded (ghost state, Phase 6) |

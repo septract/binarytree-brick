@@ -118,4 +118,73 @@ Proof using MOD MODULE.
                   rewrite anyR_tptsto_fuzzyR_val_2; [ iFrame "Hpn" | done ] ] ]).
 Qed.
 
+(** [is_red] is [return !is_black(n)]: it *calls* the just-proved [is_black]
+    (exercising the direct-call machinery with [is_black_ok] as the callee
+    proof), then negates the boolean result via [Eunop Unot]. *)
+Lemma is_red_ok :
+  |-- func_ok source is_red_func is_red_spec.
+Proof using MOD MODULE.
+  rewrite /func_ok. iSplit.
+  - iPureIntro. reflexivity.
+  - iIntros "!>" (Q vals) "Hspec".
+    iPoseProof MODULE as "#HMOD".
+    iApply wp_func_intro.
+    rewrite /is_red_func /=.
+    iDestruct "Hspec" as (pn vn) "(%Hvals & Hpn & Hspec)".
+    subst vals. simpl.
+    iDestruct "Hspec" as (n_ptr c_opt) "(%Hargs & Hpre & Hcont)".
+    injection Hargs as ->. subst.
+    wp_auto.
+    iIntros (p).
+    (** [!e]: evaluate the inner [is_black(n)] call, then negate. *)
+    iApply wp_operand_unop.
+    (** Resolve the direct call to [is_black]. Let [iApply] infer the callee
+        [name] from the goal's raw [Eglobal] term (rather than forcing the folded
+        [is_black_name], which blocks keyed unification), then discharge the
+        symbol-table premises by conversion. *)
+    iApply wp_operand_call;
+      rewrite /wp_call /=;
+      iIntros "%_";
+      rewrite /wp.WPE.Mbind /wp.WPE.Mmap /=.
+    iApply wp_operand_cfun2ptr_global; [ exact is_black_lookup | exact is_black_has_body | ].
+    iSplitL "HMOD"; [ iExact "HMOD" |].
+    iExists (_global is_black_name).
+    iSplit; [ iPureIntro; reflexivity |].
+    wp_nd_args ltac:(wp_read_local "Hpn" (Vptr n_ptr)).
+    all: wp_call_direct "HMOD" is_black_lookup is_black_has_body is_black_ok is_black_func.
+    (** Provide [is_black_spec] precondition: arg [n], ghost [c_opt], and the
+        [_color]/[structR] resources ([Hpre]); receive them back in the post. *)
+    all: rewrite /is_black_spec; simpl;
+         iExists _, (Vptr n_ptr);
+         iSplit; [ iPureIntro; reflexivity |];
+         iSplitR "Hpn Hpre Hcont"; [ iFrame |];
+         iExists n_ptr, c_opt;
+         iSplit; [ iPureIntro; reflexivity |];
+         iSplitL "Hpre"; [ iExact "Hpre" |].
+    (** Post-call: receive the color resources back + the [is_black] result. *)
+    all: iIntros (ret) "Hpost";
+         iIntros (rp) "(Hany & Hres)";
+         wp_auto;
+         wp_destroy_prim_temp "Hany";
+         (** [operand_receive] in operand (not local-storing) context: provide the
+             callee's return value from [rp], leaving the [Eunop Unot] obligation. *)
+         iModIntro; rewrite operand_receive.unlock /=;
+         iExists (Vbool (match c_opt with Some Red => false | _ => true end));
+         iFrame "Hres".
+    (** [Eunop Unot]: the result is [negb] of [is_black], which is exactly the
+        [is_red] postcondition value. *)
+    all: iExists (Vbool (negb (match c_opt with Some Red => false | _ => true end)));
+         iSplit; [ iPureIntro; apply eval_not_bool |];
+         iIntros "Hret";
+         repeat wp_step.
+    (** Discharge [is_red]'s [Hcont]: give back the color resources ([Hpost]),
+        then frame [pn|->anyR] and the negated result. [destruct c_opt] (and the
+        inner [c]) reduces [~~ (is_black …)] to the [is_red] literal so the
+        return value matches syntactically. *)
+    all: destruct c_opt as [c |]; [ destruct c |]; simpl in *;
+         ( iApply ("Hcont" $! p with "Hpost");
+           iFrame "Hret";
+           rewrite anyR_tptsto_fuzzyR_val_2; [ iFrame "Hpn" | done ] ).
+Qed.
+
 End with_Sigma.
