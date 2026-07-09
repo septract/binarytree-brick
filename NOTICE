@@ -6,19 +6,28 @@ This project is licensed under the BSD 3-Clause License (see LICENSE).
 Third-party components
 ----------------------
 
-The `ddl/` directory contains C++ headers copied verbatim (snapshot date
-2026-02-12) from the Daedalus project by Galois, Inc.:
+The `cpp/ddl/` directory contains C++ headers copied (snapshot date 2026-02-12)
+from the Daedalus project by Galois, Inc.:
 
     https://github.com/GaloisInc/daedalus  (rts-c/ddl/)
 
-    - boxed.h
-    - debug.h
-    - map.h
-    - maybe.h
-    - size.h
+    - boxed.h    (verbatim)
+    - debug.h    (verbatim)
+    - maybe.h    (verbatim)
+    - size.h     (verbatim)
+    - map.h      (one verification-local modification, see below)
 
 Daedalus is distributed under the BSD 3-Clause License. Each header retains
 a comment identifying its upstream source.
+
+`cpp/ddl/map.h` carries a single, clearly-marked, behaviour-preserving change
+for verification: the 12 *uses* of the `Node::black`/`Node::red` colour
+constants are replaced by the literals `false`/`true` (each marked with a
+`/*black*/` or `/*red*/` comment; the constant definitions are unchanged). This
+folds the constants to literals in the cpp2v-generated AST, avoiding a
+static-initialization modelling gap in BRiCk, with no change in behaviour
+(`Color` is `bool` and the constants ARE `false`/`true`). See the NOTE at the
+top of `Node` in `map.h` for how to revert to verbatim upstream.
 
 The Coq/Rocq proofs depend on BRiCk, the open-source C++ separation-logic
 framework:

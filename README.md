@@ -128,7 +128,7 @@ are gitignored.
 |---|---|---|
 | Functional RB-tree spec + invariants | `coq/RBTree.v` | ✅ Complete — 41 `Qed`, 0 `admit` |
 | Representation predicate | `coq/TreeRep.v` | ✅ Complete |
-| Generic wp tactic library | `coq/WpTactics.v` | ✅ Usable (some helper lemmas admitted) |
+| Generic wp tactic library | `coq/WpTactics.v` | ✅ Complete (rests on the one `align_of_function` axiom; no admits) |
 | `findNode` refinement (full: returns node holding the key/value) | `coq/FindSpec.v` | ✅ Complete — 0 `admit` |
 | `insert` top-level refinement | `coq/InsertSpec.v` | 🟡 `insert_ok` proved modulo admitted callees |
 | `setRebalanceLeft/Right` | `coq/RebalanceSpec.v` | 🟠 WIP — contains `admit`s |
@@ -150,11 +150,15 @@ gap:
   — the direct-call callee step — is **fully proved** (was previously
   `Admitted`), which unblocks the `insert` write path.
 
-The second gap — **static initialization** (`initializedR` for the
-`Node::black`/`red` global consts) — remains a deferred `Admitted`
-(`wp_operand_read_global_const`); the plan is to eliminate it at the source by
-inlining those trivial constants (see [`TODO.md`](TODO.md) A1-init) rather than
-trust an axiom. `findNode_ok` depends on neither gap. Background:
+The second gap — **static initialization** (BRiCk cannot yet model the value of
+a statically-initialized global const, e.g. `Node::black`/`red`) — has been
+**eliminated at the source** rather than trusted: those trivial constants are
+inlined to `false`/`true` literals in `cpp/ddl/map.h` (a marked, reversible,
+behaviour-preserving change; see [`NOTICE`](NOTICE)), so no global-const read is
+generated and no axiom is needed. `findNode_ok` depends on neither gap.
+
+So the entire trusted base beyond BRiCk itself is the one `align_of_function`
+axiom above. Background:
 [`docs/brick-framework-gaps.v`](docs/brick-framework-gaps.v) and
 [`docs/2026-07-07_brick_gaps_upstream_review.md`](docs/2026-07-07_brick_gaps_upstream_review.md).
 

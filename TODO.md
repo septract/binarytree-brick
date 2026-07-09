@@ -48,20 +48,16 @@ upstream filing (A1a) becomes optional/nice-to-have.
         `wp_operand_cfun2ptr_global`) rebuilds clean; `Print Assumptions
         insert_ok` shows the Gap-1 admit gone, replaced by `align_of_function`.
         ⇒ write path (Phases B–E) no longer blocked by Gap 1.
-- [ ] **A1-init** Close Gap 2 (static-init const read) at the target — no axiom.
-      `Node::black`/`red` are `static const Color(=bool)` literals
-      (`cpp/ddl/map.h:32-33`); every use is a compare or rvalue assign. Inline
-      them to literals (`black`→`false`, `red`→`true`) — or `constexpr`/enum that
-      folds — in `map.h`, so the generated AST has `Ebool false/true` (native to
-      `wp`) instead of `Ecast Cl2r (Eglobal …)`. Gap 2 then **disappears with no
-      trusted axiom**.
-  - [ ] Edit `cpp/ddl/map.h`, `make cpp2v` to regenerate the AST, confirm the
-        `Eglobal Node::black/red` reads are gone.
-  - [ ] Drop `wp_operand_read_global_const` + `black_lookup` usage from
-        `InsertSpec.v`; the `curr->color = black` writes become literal stores.
-  - [ ] Add a short **fidelity note** (we verify a source that inlines two
-        trivial named constants; behavior-identical since `Color` *is* `bool`).
-        This is a smaller ask than the current unconstrained-`v` admit.
+- [x] **A1-init** Close Gap 2 (static-init const read) at the target — **DONE**
+      (commits `c5c936e`, `4e97d8c`). Inlined the 12 uses of `Node::black`/`red`
+      to `false`/`true` literals in `cpp/ddl/map.h` (marked `/*black*/`/`/*red*/`,
+      reversible). `constexpr` did NOT work — Clang still emits the global read;
+      literal substitution does. Verified: regenerated AST has zero `Eglobal
+      black/red` reads (`curr->color = black` is now `Ebool false`), evaluated in
+      `insert_ok` via `rewrite -(wp_operand_bool _ _ false _)`. Removed the dead
+      `wp_operand_read_global_const` admit + `wp_read_global_const` tactic +
+      `black_name`/`black_lookup`. `Print Assumptions insert_ok` no longer shows
+      the read admit. NOTICE updated with the fidelity note.
 - [ ] **A1b** Consolidate any remaining trusted items into `Trusted.v` and add a
       `Print Assumptions` audit (Makefile `make audit`) so the trusted base is
       visible in one place and cannot silently grow. After A1-fn + A1-init the
