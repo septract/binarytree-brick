@@ -1092,7 +1092,7 @@ Ltac wp_nd_args eval_operand :=
 Ltac wp_operand_call_direct1 HMOD lookup body fname fok func_def H_local vp H_struct :=
   iApply wp_operand_call;
     rewrite /wp_call /=;
-    iIntros "%_";
+    iIntros "%";
     rewrite /wp.WPE.Mbind /wp.WPE.Mmap /=;
   iApply wp_operand_cfun2ptr_global; [ exact lookup | exact body | ];
   iSplitL HMOD; [ iExact HMOD | ];
@@ -1113,12 +1113,16 @@ Ltac wp_operand_call_direct1 HMOD lookup body fname fok func_def H_local vp H_st
   iApply wp_operand_cast_noop;
   wp_read_local H_local vp;
   iDestruct (observe (reference_to _ _) with H_struct) as "#_rt";
-  iDestruct (reference_to_elim with "_rt") as "(%Halign & %Hnn & #_val & _)";
+  iDestruct (reference_to_elim with "_rt") as "(%Halign_cd & %Hnn_cd & #_val & _)";
   iSplitR;
   [ rewrite has_type_ptr';
     iSplitR; [ iApply "_val" | ];
     iPureIntro; rewrite aligned_ptr_ty_erase_qualifiers /=; assumption
   | ];
+  (* clear the internal pure [reference_to] facts (alignment + non-null) so a
+     second use of this tactic doesn't clash on their names *)
+  try (match goal with H : aligned_ptr_ty _ _ |- _ => clear H end);
+  try (match goal with H : _ <> nullptr |- _ => clear H end);
   iIntros "Hargp";
   rewrite /wp.WPE.Mmap /wp.WPE.Mret /=;
   iNext;
@@ -1129,7 +1133,10 @@ Ltac wp_operand_call_direct1 HMOD lookup body fname fok func_def H_local vp H_st
    end);
   iApply (wp_fptr_of_func_ok_compat _ _ _ _ _ _ (tu_compat));
   iSplitR; [ iExact "_call_ca" | ];
-  iSplitR; [ iExact "_call_fok" | ].
+  iSplitR; [ iExact "_call_fok" | ];
+  (* clear persistent intermediates so a second use of this tactic (e.g. the
+     is_black then is_red guard calls) doesn't clash on these names *)
+  iClear "_rt _val _call_ca _call_fok".
 
 (* ================================================================= *)
 (** ** Layer 3: Meta-Tactics *)
