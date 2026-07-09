@@ -104,8 +104,14 @@ Proof using MOD MODULE.
     all: destruct (ins_is_node k v t) as [c' [l' [k' [v' [r' Hins_eq]]]]];
          iRevert "Hins_tree"; rewrite Hins_eq; iIntros "Hins_tree";
          wp_unfold_node "Hins_tree".
+    (** [curr->color = black]: since [Node::black] is now [constexpr] (see the
+        verification-local change in [cpp/ddl/map.h] — BRiCk Gap 2 / TODO
+        A1-init), the RHS is a literal [Ebool false] in the AST rather than a
+        global-const read. Evaluate it directly with [wp_operand_bool] (yielding
+        [Vbool false]) instead of [wp_read_global_const] / [black_lookup] — no
+        trusted static-init axiom involved. *)
     all: wp_auto; wp_assign_setup;
-         wp_read_global_const "HMOD" black_lookup (Vbool false);
+         rewrite -(wp_operand_bool _ _ false _);
          wp_offset "_ncolor";
          wp_assign_member_field "Hcurr_local" (Vptr curr) "_nstruct" "_ncolor";
          iIntros "_ncolor_new"; wp_auto.

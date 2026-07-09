@@ -31,6 +31,16 @@ class Map : HasRefs {
 
     static const Color red = true;
     static const Color black = false;
+    // NOTE (BRiCk Gap 2 / TODO A1-init): the two constants above are kept as
+    // upstream, but every *use* of `black`/`red` in this struct's code below is
+    // replaced by the literal `false`/`true`, each marked with a trailing
+    // `/*black*/` or `/*red*/` comment. This eliminates the
+    // `Ecast Cl2r (Eglobal Node::black …)` static-const reads from the cpp2v AST
+    // (BRiCk cannot yet model `initializedR` for statically-initialized
+    // globals). Behaviour-identical: `Color` is `bool`; the constants ARE
+    // `false`/`true`. To restore upstream fidelity, revert the literals at the
+    // `/*black*/`/`/*red*/` sites back to `black`/`red`. (`constexpr` alone does
+    // NOT work — Clang still emits the global read.)
 
     // own left, key, value, right
     Node(Color color, Node *left, Key key, Value value, Node *right)
@@ -87,7 +97,7 @@ class Map : HasRefs {
     }
 
     // borrow n
-    static bool is_black(Node const* n) { return n == nullptr || n->color == black; }
+    static bool is_black(Node const* n) { return n == nullptr || n->color == false /*black*/; }
 
     // borrow n
     static bool is_red(Node const* n) { return !is_black(n); }
@@ -97,7 +107,7 @@ class Map : HasRefs {
     // own k, own v, own n
     static Node* insert(Key k, Value v, Node *n) {
       Node *curr  = ins(k, v, n);
-      curr->color = black;
+      curr->color = false /*black*/;
       return curr;
     }
 
@@ -107,7 +117,7 @@ class Map : HasRefs {
       dump(tab + 2, n->left);
       for (int i = 0; i < tab; ++i) debug(" ");
       debugVal((void*)n); debug(" ");
-      debug(n->color == red ? "R" : "B");
+      debug(n->color == true /*red*/ ? "R" : "B");
       debug("("); debugVal(n->ref_count); debug(") ");
       debug("Key:"); debugVal(n->key); debug(" Val:"); debugValNL(n->value);
       dump(tab + 2, n->right);
@@ -131,7 +141,7 @@ class Map : HasRefs {
     // owns k, owns v, owns n
     // returns an owned *unique* node (i.e, node with ref_count == 1)
     static Node* ins(Key k, Value v, Node * n) {
-      if (n == nullptr) return new Node(red, nullptr, k, v, nullptr);
+      if (n == nullptr) return new Node(true /*red*/, nullptr, k, v, nullptr);
 
       n = Node::makeCopy(n); // make n unique
 
@@ -161,10 +171,10 @@ class Map : HasRefs {
         if (is_red(sub2)) {
 
           Node* l = makeCopy(sub2);
-          l->color = black;
+          l->color = false /*black*/;
 
           Node* r = n;
-          r->color = black;
+          r->color = false /*black*/;
           r->left  = newLeft->right;
 
           newLeft->left = l;
@@ -175,11 +185,11 @@ class Map : HasRefs {
         // left-right
         sub2 = newLeft->right;
         if (is_red(sub2)) {
-          newLeft->color = black;
+          newLeft->color = false /*black*/;
           newLeft->right = sub2->left;
 
           Node *r     = n;
-          r->color    = black;
+          r->color    = false /*black*/;
           r->left     = sub2->right;
 
           Node *res   = makeCopy(sub2);
@@ -206,10 +216,10 @@ class Map : HasRefs {
         Node *sub2 = newRight->left;
         if (is_red(sub2)) {
           Node *l  = n;
-          l->color = black;
+          l->color = false /*black*/;
           l->right = sub2->left;
 
-          newRight->color = black;
+          newRight->color = false /*black*/;
           newRight->left  = sub2->right;
 
           Node* res = makeCopy(sub2);
@@ -222,11 +232,11 @@ class Map : HasRefs {
         sub2 = newRight->right;
         if (is_red(sub2)) {
           Node *l = n;
-          l->color = black;
+          l->color = false /*black*/;
           l->right = newRight->left;
 
           Node *r = makeCopy(sub2);
-          r->color = black;
+          r->color = false /*black*/;
 
           newRight->left = l;
           newRight->right = r;
