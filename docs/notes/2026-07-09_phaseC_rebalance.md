@@ -106,7 +106,65 @@ Key facts nailed down:
 - `aligned_ptr_ty_erase_qualifiers` (ptrs.v:631) turns the goal's `const Node`
   alignment into plain `_Node = Tnamed _Node_name` alignment → `exact _align`.
 
-### CAVEAT — the one thing still to fix (next session starts here)
+### UPDATE 2026-07-09 (later): the nd_seqs snag is solved; the REAL blocker is the fun-type
+Hand-stepping the single-arg `nd_seqs` (instead of `wp_nd_args`) works cleanly:
+```coq
+rewrite /wp.WPE.nd_seqs /=.
+iIntros (pre post q) "%Hnd".
+destruct pre as [| ?x0 [| ?x1 ?rest]]; simpl in Hnd; try congruence.
+injection Hnd; clear Hnd; intros; subst; simpl.
+rewrite /wp.WPE.Mbind /call.wp_arg /=.
+iIntros (argp).
+rewrite /wp_initialize /qual_norm /=. try rewrite wp_initialize_unqualified.unlock /=.
+iApply wp_operand_cast_noop.
+wp_read_local "Hpn" (Vptr n_ptr).
+(* extract has_type facts persistently BEFORE iSplitR (Hstruct is spatial!) *)
+iDestruct (observe (reference_to _ n_ptr) with "Hstruct") as "#_rt".
+iDestruct (reference_to_elim with "_rt") as "(%_align & %_nn & #_val & _)".
+iSplitR.
+{ rewrite has_type_ptr'. iSplitR; [ iApply "_val" |].
+  iPureIntro. rewrite aligned_ptr_ty_erase_qualifiers /=. exact _align. }
+iIntros "?". rewrite /wp.WPE.Mmap /wp.WPE.Mret /=. iNext.
+```
+After this the goal is exactly
+`wp_fptr (types (genv_tu σ)) (Tfunction (FunctionType "bool"
+  [to_arg_type (Tptr (Tqualified (merge_tq QM (merge_tq QM QC)) "…Node"))]))
+  (_global is_black_name) [argp] (λ v, …)`
+and the `wp_fptr _ ?ft _ _ _` match DOES fire (verified via `idtac`).
+
+**THE BLOCKER:** `wp_call_direct` then does
+`change ft with (type_of_value (Ofunction is_black_func))` and that fails with
+"No matching clauses for match". Reason: the call-site `ft` above has the arg
+type `to_arg_type (Tptr (Tqualified (merge_tq QM (merge_tq QM QC)) "…Node"))`
+— extra `merge_tq QM` qualifiers coming from the `Cnoop`/`(const T*)` cast at
+the call site — whereas `type_of_value (Ofunction is_black_func)` has the
+*declared* arg type `Tptr (Qconst _Node)`. They are NOT convertible, so `change`
+(and hence `wp_call_direct`) fails. In `is_red_ok` the call site's arg had no
+such extra qualification, so `change` succeeded.
+
+Fix directions for next session (pick one, verify with the 3-second scratch idea
+won't work here since it needs the AST — budget one AST build):
+1. Find/build a `wp_fptr`-level lemma that tolerates convertible-up-to-
+   qualifier-normalization function types, or normalize the goal's `ft` first
+   (e.g. `rewrite` a `to_arg_type`/`merge_tq QM` simplification: `merge_tq QM q =
+   q`, and `to_arg_type` of a qualified ptr = the erased/normalized ptr). Look
+   for `merge_tq_QM_l`/`merge_tq_id`/`to_arg_type` lemmas in
+   `.brick-workspace/.../specs/*.v` and `syntax/types.v`.
+2. Or apply `wp_fptr_of_func_ok` DIRECTLY (skip the `change`): `iApply
+   (wp_fptr_of_func_ok …)` and let unification/`f_equal` reconcile the fun types,
+   discharging the qualifier mismatch with a `types_compat`/`type_of_value`
+   rewrite. Check `wp_fptr_of_func_ok`'s statement — it may already quantify the
+   function type and only need the arg *values* to line up.
+3. Or prove a small `func_ok`-conversion: `is_black_ok` at the call-site's
+   qualified function type from `is_black_ok` at the declared type (they should
+   be equal after `merge_tq QM`/`to_arg_type` normalization).
+This qualifier-normalization is the ONLY thing between here and closing the
+`c=Red` default case; everything up to and including the `wp_fptr` goal is
+proved. Once the call resolves, provide `is_black_spec` precond (ghost `Some
+Red` from `Hcolor`+`Hstruct`), get `false` back, short-circuit `Eseqand`, take
+the `Sif` else branch, close via `setRebalanceLeft_default` + `treeR_node_fold`.
+
+### (superseded) earlier caveat about wp_nd_args leaving two goals
 `wp_nd_args` did NOT fully resolve the single-arg `nd_seqs` with the above eval
 tactic: it left the trailing empty-list recursion goal `∀ pre post q, [ [wp_arg …]
 = pre ++ q :: post ] -∗ Mbind …`, so the subsequent `wp_call_direct` failed with
