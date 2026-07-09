@@ -164,6 +164,89 @@ proved. Once the call resolves, provide `is_black_spec` precond (ghost `Some
 Red` from `Hcolor`+`Hstruct`), get `false` back, short-circuit `Eseqand`, take
 the `Sif` else branch, close via `setRebalanceLeft_default` + `treeR_node_fold`.
 
+### RESOLVED 2026-07-09: Case 1 (c=Red) of setRebalanceLeft_ok is CLOSED
+The fraction mismatch was fixed by parameterizing `is_black_spec`/`is_red_spec`
+by the fraction: `\prepost{c_opt q} match c_opt with Some c => n_ptr |-> (_color
+|-> boolR q … ∗ structR q) | None => [|…|] end` (note: `\prepost{c_opt q}` — one
+brace, space-separated, types inferred; `{c_opt:..}{q:..}` double-brace does NOT
+parse). `is_black_ok`/`is_red_ok` re-proved unchanged except the prologue now
+binds `q` from the spec (`iDestruct "Hspec" as (n_ptr c_opt q) …`) and the Some
+case drops the inner `iExists q`. Both still `Qed`. With `q` caller-chosen, the
+RebalanceSpec caller lends `cQp.m 1` and gets it back concretely, so
+`treeR_node_fold` folds. Case 1 is fully proved (RebalanceSpec: 22→21 admits);
+the final field write used `wp_field_to_primR "Hleft_new" "Hleft2" (Vptr nl_ptr)
+I` (tptstoR→ptrR) before the fold, and the return needed `repeat wp_step` to
+strip the fupd/`KP`/`ReturnVal` down to `Q retp`. The full working sequence
+below is now committed as the Case-1 proof; the remaining default cases
+(2a Leaf, 2b Node Black, 2b-Red non-rotating) reuse it verbatim.
+
+### (historical) guard+default path mapping — fraction mismatch (now fixed above)
+The full `c=Red` default case was driven end-to-end and every step builds; the
+ONLY remaining error is a fraction mismatch at the final `treeR_node_fold`.
+Working sequence (all verified against the AST, in order):
+1. `wp_if`/`wp_test`/`wp_operand_seqand` — enter guard.
+2. `is_black(n)` call: `wp_operand_call` → hand-stepped 1-arg `nd_seqs`
+   (`iIntros (pre post q) "%Hnd"; destruct pre; injection; subst`) →
+   `wp_operand_cast_noop` + `wp_read_local "Hpn"` + has_type discharge from
+   `Hstruct` via `reference_to_elim` + `aligned_ptr_ty_erase_qualifiers`.
+3. **fun-type qualifier fix (KEY):** the call-site `ft` (with `to_arg_type`/
+   `merge_tq QM (merge_tq QM QC)`) is reconciled with
+   `type_of_value (Ofunction is_black_func)` by
+   `match goal with |- context[wp_fptr _ ?ft _ _ _] => replace ft with
+   (type_of_value (Ofunction is_black_func)) by (vm_compute; reflexivity) end`
+   — `vm_compute` (NOT `change`) because they're equal only after
+   normalization. Then `iApply (wp_fptr_of_func_ok_compat _ _ _ _ _ _ tu_compat)`
+   (the `_compat` variant, since the goal uses `(genv_tu σ).(types)` not
+   `source.(types)`), framing `code_at_of_denoteModule` and
+   `(is_black_ok MODULE)` — note `is_black_ok` needs `MODULE` applied explicitly.
+4. Provide `is_black_spec` precond: `iExists argp (Vptr n_ptr); …; iExists n_ptr
+   (Some Red); …; iExists (cQp.m 1); rewrite _at_sep /=; iFrame "Hcolor Hstruct"`.
+   (The arg temp must be named — `iIntros "Hargp"`, not `"?"` — to frame the
+   outer `pv|->tptsto`.)
+5. Post-call: `iIntros (ret) "Hpost"; iIntros (rx) "(Hany & Hres)"; wp_auto;
+   wp_destroy_prim_temp "Hany"; iModIntro; rewrite operand_receive.unlock /=;
+   iExists (Vbool false); iFrame "Hres"`. `is_black` of a Red node = `false`.
+6. `simpl` reduces `is_true (Vbool false) = Some false` → `Eseqand`
+   short-circuits (NO is_red call) → default path.
+7. Default: `iIntros (addr); wp_read_local "Hpn"` (`res=n`); `wp_assign_setup;
+   wp_read_local "Hpnl"; wp_offset "Hleft"; wp_assign_member_field "Hres_local"
+   (Vptr n_ptr) "Hstruct" "Hleft"` (`res->left=newLeft`); read `res`, destroy
+   local; `wp_revert_offset "Hleft_new"`.
+
+**THE ONE REMAINING BLOCKER (fraction mismatch):** `is_black_spec`'s
+`\prepost{c_opt}` has `Some c => Exists (q : Qp), n_ptr |-> (_color |-> boolR q …
+∗ structR q)`. The `Exists q` is INSIDE the prepost resource, so on return the
+borrowed color+struct come back at an OPAQUE `q_c` (even though we lent
+`cQp.m 1`), while the other node fields (`Hrc/Hkey/Hval/Hleft/Hright`) are still
+`cQp.m 1`. `treeR_node_fold` needs ALL fields at the SAME fraction, so it can't
+fold (`iFrame` fails on `n_ptr |-> _color |-> boolR q_c$m true`).
+
+**RECOMMENDED FIX (do this first next session):** parameterize `is_black_spec`
+(and `is_red_spec`) by the fraction as a spec-level `\with{q}` (or make it a
+`\prepost` argument) instead of an internal `Exists q`:
+```
+\arg{n_ptr} "n" (Vptr n_ptr)
+\prepost{c_opt : option Color}{q : Qp}   (* q now caller-chosen, returned concretely *)
+  match c_opt with Some c => n_ptr |-> (_color |-> boolR q (color_to_bool c) ∗
+                                        structR _Node_name q)
+                 | None => [| n_ptr = nullptr |] end
+```
+Then the caller passes `q := cQp.m 1` and gets it back at `cQp.m 1` (no opaque
+existential), so `treeR_node_fold` folds. `is_black_ok`/`is_red_ok` already
+handle an arbitrary `q` (they `iDestruct "Hpre" as (q) "..."`), so re-proving
+them under the new spec is essentially a no-op — just move the `q` binder from
+inside the resource to the spec's `\with`/`\prepost` binder and re-run the two
+`Qed`s (~1 min each) + this RebalanceSpec proof. Alternative (worse): lend
+`is_black` a fractional half and recombine — but `treeR_node_fold` wants full
+`cQp.m 1`, so fraction-splitting adds bookkeeping for no benefit.
+
+Everything else in the `c=Red` default case is proven. Once the fraction is
+concrete, the fold + `iApply ("Hcont" $! n_ptr with "Htree")` + frame
+`Hpn`/`Hpnl`→anyR + `Hret_store` closes it. The other default cases
+(`newL=Leaf`, `newL=Node Black`, `newL=Node Red non-Red/non-Red`) reuse the same
+guard machinery (is_black returns true then is_red returns false → still
+short-circuits to default) and the same default-path tail.
+
 ### (superseded) earlier caveat about wp_nd_args leaving two goals
 `wp_nd_args` did NOT fully resolve the single-arg `nd_seqs` with the above eval
 tactic: it left the trailing empty-list recursion goal `∀ pre post q, [ [wp_arg …]

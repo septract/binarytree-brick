@@ -23,7 +23,7 @@ Proof using MOD MODULE.
     rewrite /is_black_func /=.
     iDestruct "Hspec" as (pn vn) "(%Hvals & Hpn & Hspec)".
     subst vals. simpl.
-    iDestruct "Hspec" as (n_ptr c_opt) "(%Hargs & Hpre & Hcont)".
+    iDestruct "Hspec" as (n_ptr c_opt q) "(%Hargs & Hpre & Hcont)".
     injection Hargs as ->. subst.
     wp_auto.
     iIntros (p).
@@ -32,7 +32,7 @@ Proof using MOD MODULE.
     (** LHS: evaluate [n == nullptr] as a pointer Beq. *)
     destruct c_opt as [c |].
     + (** Some c: n_ptr <> nullptr, so LHS is false; then evaluate RHS. *)
-      iDestruct "Hpre" as (q) "[Hcolor Hstruct]".
+      iDestruct "Hpre" as "[Hcolor Hstruct]".
       iDestruct (observe (n_ptr |-> nonnullR) with "Hstruct") as "#Hnn".
       iDestruct (observe (n_ptr |-> validR) with "Hstruct") as "#Hvld".
       rewrite _at_nonnullR. iDestruct "Hnn" as "%Hne".
@@ -88,7 +88,7 @@ Proof using MOD MODULE.
                           destruct c; simpl;
                           ( wp_revert_offset "Hcolor";
                             iPoseProof ("Hcont" $! p with "[Hcolor Hstruct]") as "Hc";
-                            [ iSplitL; [ iExists q; rewrite _at_sep; iFrame "Hcolor Hstruct" | done ]
+                            [ iSplitL; [ rewrite _at_sep; iFrame "Hcolor Hstruct" | done ]
                             | iApply ("Hc" $! p with "[Hpn Hret]");
                               iFrame "Hret";
                               rewrite anyR_tptsto_fuzzyR_val_2; [ iFrame "Hpn" | done ] ] ) ]) ]).
@@ -132,7 +132,7 @@ Proof using MOD MODULE.
     rewrite /is_red_func /=.
     iDestruct "Hspec" as (pn vn) "(%Hvals & Hpn & Hspec)".
     subst vals. simpl.
-    iDestruct "Hspec" as (n_ptr c_opt) "(%Hargs & Hpre & Hcont)".
+    iDestruct "Hspec" as (n_ptr c_opt q) "(%Hargs & Hpre & Hcont)".
     injection Hargs as ->. subst.
     wp_auto.
     iIntros (p).
@@ -158,7 +158,7 @@ Proof using MOD MODULE.
          iExists _, (Vptr n_ptr);
          iSplit; [ iPureIntro; reflexivity |];
          iSplitR "Hpn Hpre Hcont"; [ iFrame |];
-         iExists n_ptr, c_opt;
+         iExists n_ptr, c_opt, q;
          iSplit; [ iPureIntro; reflexivity |];
          iSplitL "Hpre"; [ iExact "Hpre" |].
     (** Post-call: receive the color resources back + the [is_black] result. *)

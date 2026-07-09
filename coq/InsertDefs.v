@@ -310,10 +310,10 @@ Definition is_black_spec : function_spec :=
     (cpp_spec (ar:=Ar_Definite) Tbool
       (Tptr (Qconst _Node) :: nil)
       (\arg{n_ptr} "n" (Vptr n_ptr)
-       \prepost{c_opt : option Color}
+       \prepost{c_opt q}
          match c_opt with
          | None => [| n_ptr = nullptr |]
-         | Some c => Exists (q : Qp),
+         | Some c =>
              n_ptr |-> (_color |-> boolR q (color_to_bool c) **
                         structR _Node_name q)
          end
@@ -332,10 +332,10 @@ Definition is_red_spec : function_spec :=
     (cpp_spec (ar:=Ar_Definite) Tbool
       (Tptr (Qconst _Node) :: nil)
       (\arg{n_ptr} "n" (Vptr n_ptr)
-       \prepost{c_opt : option Color}
+       \prepost{c_opt q}
          match c_opt with
          | None => [| n_ptr = nullptr |]
-         | Some c => Exists (q : Qp),
+         | Some c =>
              n_ptr |-> (_color |-> boolR q (color_to_bool c) **
                         structR _Node_name q)
          end
