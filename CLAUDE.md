@@ -72,3 +72,31 @@ that `Require`s the AST once, starts the lemma, and prints goals with
 > path in this dune-workspace layout. The preloaded-coqtop loop above is the
 > workflow we use. (`pet`/coq-lsp finds its stdlib by locating a `rocq` binary
 > on `PATH` — a useful fact if that route is ever revisited.)
+
+## Proof-automation library: design principles
+
+The tactic library has two layers; keep them cleanly separated:
+- **`WpTactics.v` — GENERIC wp automation.** No `RBTree`/`TreeRep` imports.
+  Statement stepping (`wp_step`/`wp_auto`), operand eval, call resolution
+  (`wp_resolve_call`, `wp_operand_cfun2ptr_global`), comparison evaluators
+  (`wp_eval_ptr_neq_*`, `wp_eval_int_binop`), and the one trusted axiom
+  `align_of_function`. Anything reusable on *any* C++ belongs here.
+- **`Tactics.v` — TREE-SPECIFIC.** Re-exports `WpTactics`. Everything tied to
+  `treeR` / `_Node` / node fields / `structR _Node_name` (`treeR_node_fold`,
+  `treeR_node_nonnull`, `wp_unfold_node`, …).
+- **Proof files stay thin** and compose the two layers.
+
+When adding a proof, decide per-tactic which layer a reusable step belongs to;
+a step touching `_color`/`_Node`/`structR`-of-node is tree-specific, the seqor/
+cast/call machinery is generic.
+
+### When to migrate a pattern into the library
+Extract on the **second genuine occurrence**, not the first — and only when the
+occurrences are the *same shape*, not superficially similar. Keep each tactic
+doing one legible thing (don't build mega-tactics that hide what a proof does).
+The `func_ok` prologue (`rewrite /func_ok; iSplit; iIntros "!>"; wp_func_intro;
+rewrite /<f>_func /=; iDestruct …args…`) recurs verbatim in every `*_ok` proof
+— a prime candidate to lift as a generic `wp_open_func`. `Eseqor`/`Eseqand`
+short-circuit (`is_black`; `setRebalance*`'s `is_black && is_red`) and the
+`Cintegral`+bool-`Beq` compare are the next generic extractions once a second
+use lands.

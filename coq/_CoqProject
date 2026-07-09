@@ -29,6 +29,7 @@ Tactics.v
 FindSpec.v
 InsertDefs.v
 InsertSpec.v
+IsBlackSpec.v
 RebalanceSpec.v
 InsSpec.v
 RefCount.v

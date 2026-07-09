@@ -125,6 +125,10 @@ $(COQ_DIR)/InsertDefs.vo: $(COQ_DIR)/InsertDefs.v $(COQ_DIR)/RBTree.vo $(COQ_DIR
 $(COQ_DIR)/InsertSpec.vo: $(COQ_DIR)/InsertSpec.v $(COQ_DIR)/RBTree.vo $(COQ_DIR)/TreeRep.vo $(COQ_DIR)/Tactics.vo $(COQ_DIR)/InsertDefs.vo
 	$(COQC) $(COQFLAGS) $<
 
+# Phase B: is_black_ok (leaf color read; is_red_ok to follow)
+$(COQ_DIR)/IsBlackSpec.vo: $(COQ_DIR)/IsBlackSpec.v $(COQ_DIR)/RBTree.vo $(COQ_DIR)/TreeRep.vo $(COQ_DIR)/Tactics.vo $(COQ_DIR)/InsertDefs.vo
+	$(COQC) $(COQFLAGS) $<
+
 # Phase 5B: setRebalanceLeft_ok + setRebalanceRight_ok
 $(COQ_DIR)/RebalanceSpec.vo: $(COQ_DIR)/RebalanceSpec.v $(COQ_DIR)/InsertDefs.vo $(COQ_DIR)/Tactics.vo
 	$(COQC) $(COQFLAGS) $<
@@ -143,6 +147,7 @@ proofs: $(COQ_DIR)/WpTactics.vo \
         $(COQ_DIR)/RBTree.vo $(COQ_DIR)/TreeRep.vo \
         $(COQ_DIR)/Tactics.vo $(COQ_DIR)/FindSpec.vo \
         $(COQ_DIR)/InsertDefs.vo $(COQ_DIR)/InsertSpec.vo \
+        $(COQ_DIR)/IsBlackSpec.vo \
         $(COQ_DIR)/RebalanceSpec.vo $(COQ_DIR)/InsSpec.vo \
         $(COQ_DIR)/RefCount.vo $(COQ_DIR)/Invariants.vo
 
