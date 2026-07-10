@@ -404,3 +404,37 @@ Iris proofs, whole-file recheck by coqc). Iterate new cases via a faithful
 scratch (RBTree/TreeRep/Tactics only, ~3s) per CLAUDE.md, NOT the full build.
 Remaining: the double-Black default case, all LL/LR ROTATIONS (blocked on Phase D
 makeCopy), and the entire `setRebalanceRight_ok` mirror.
+
+## DEBUG 2026-07-09 (session 3): root-caused + fixed the nested-unfold gotcha
+
+**Bug:** `wp_unfold_node H` does `iRevert H; rewrite _at_as_Rep; iIntros H`.
+`_at_as_Rep : p |-> as_Rep f ⊣⊢ f p` is applied by a GOAL-WIDE `rewrite` with no
+occurrence control. When the reverted `H : _lp |-> as_Rep …` sits in a goal that
+ALSO contains other `as_Rep` terms — e.g. a sibling child's already-reduced
+`treeR (Node …)`, or the folded left child `Htree_l_child` — `rewrite` fires on
+the FIRST `as_Rep`, which may not be `H`. Then `H` stays `_lp |-> as_Rep …` and
+the following `iDestruct H as (lp rp rc) "(...)"` throws `iExistDestruct: cannot
+destruct`. The single-child cases (2a/2b-Black/the two mixed) worked only because
+no competing `as_Rep` was present; the double-Node-Black case has two.
+
+**Verified** in a ~5s faithful scratch (`ScratchUnfold.v`, since deleted): with a
+competing `treeR (Node Red …)` in scope, the old `iRevert; rewrite _at_as_Rep;
+iIntros; iDestruct as (…)` FAILS (confirmed with a `Fail` guard), while
+`iDestruct (treeR_node_unfold with "H") as (lp rp rc) "(...)"` succeeds — because
+it targets only the named hypothesis, no goal-wide rewrite.
+
+**Fix (committed):**
+- `treeR_node_unfold` (Tactics.v) — the entailment `p |-> treeR q (Node c l k v
+  r) |-- ∃ lp rp rc, lp|->treeR l ∗ rp|->treeR r ∗ p|->(fields)`; reverse of
+  `treeR_node_fold`.
+- `wp_unfold_node' H` (Tactics.v) — robust variant using
+  `iDestruct (treeR_node_unfold with H) as (…) "(...)"`. Use it for CHILD
+  unfolds / any unfold where a competing `as_Rep` may be in scope;
+  `wp_unfold_node` remains fine when `H` is the only `treeR (Node …)`.
+
+**General lesson:** never `rewrite _at_as_Rep` (or any `treeR`/`as_Rep`
+equational lemma) goal-wide when more than one `as_Rep` can be present — apply
+the entailment to the specific hypothesis with `iDestruct (… with "H")` instead.
+This is the occurrence-control analogue of the CLAUDE.md "treeR is a Fixpoint"
+gotcha. If other multi-node proofs (InsSpec, makeCopy) hit the same wall, reach
+for `wp_unfold_node'`.

@@ -99,6 +99,28 @@ Proof.
   iExists lp, rp, rc. iFrame.
 Qed.
 
+(** Reverse of [treeR_node_fold]: unfold [treeR (Node ...)] into its fields.
+
+    Stated as an entailment so it can be applied to a SPECIFIC hypothesis via
+    [iDestruct (treeR_node_unfold with "H") as (lp rp rc) "(...)"]. This is the
+    robust unfold: unlike [wp_unfold_node]'s [iRevert; rewrite _at_as_Rep;
+    iIntros], it does NOT do a goal-wide [rewrite _at_as_Rep] and so cannot fire
+    on the wrong [as_Rep] when the goal contains competing ones (e.g. other
+    already-reduced [treeR (Node ...)] hyps/goals). See [wp_unfold_node']. *)
+Lemma treeR_node_unfold q c l k v r (p : ptr) :
+  p |-> treeR q (Node c l k v r) |--
+    Exists (lp rp : ptr) (rc : Z),
+      lp |-> treeR q l **
+      rp |-> treeR q r **
+      p |-> (_ref_count |-> ulongR q rc **
+             _color     |-> boolR q (color_to_bool c) **
+             _key       |-> intR q k **
+             _value     |-> intR q v **
+             _left      |-> ptrR<_Node> q lp **
+             _right     |-> ptrR<_Node> q rp **
+             structR _Node_name q).
+Proof. rewrite treeR_node _at_as_Rep. auto. Qed.
+
 End tree_lemmas.
 
 (** ** [wp_unfold_node H] — Destructure [treeR (Node ...)] into fields
@@ -127,6 +149,22 @@ Ltac wp_unfold_node H :=
   let rp := fresh "_rp" in
   let rc := fresh "_rc" in
   iDestruct H as (lp rp rc) "(_ntl & _ntr & _nnode)";
+  iDestruct "_nnode" as
+    "(_nrc & _ncolor & _nkey & _nval & _nleft & _nright & _nstruct)".
+
+(** [wp_unfold_node' H] — robust variant of [wp_unfold_node].
+
+    Uses [treeR_node_unfold] applied to the specific hypothesis [H], instead of
+    a goal-wide [rewrite _at_as_Rep]. Safe when the goal contains competing
+    [as_Rep] terms (other already-reduced [treeR (Node ...)]) — e.g. when
+    unfolding a CHILD node while the parent's fields or a sibling subtree are
+    still in scope. Prefer this inside nested unfolds; [wp_unfold_node] is fine
+    when [H] is the only [treeR (Node ...)] around. *)
+Ltac wp_unfold_node' H :=
+  let lp := fresh "_lp" in
+  let rp := fresh "_rp" in
+  let rc := fresh "_rc" in
+  iDestruct (treeR_node_unfold with H) as (lp rp rc) "(_ntl & _ntr & _nnode)";
   iDestruct "_nnode" as
     "(_nrc & _ncolor & _nkey & _nval & _nleft & _nright & _nstruct)".
 
