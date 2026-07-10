@@ -438,3 +438,25 @@ the entailment to the specific hypothesis with `iDestruct (… with "H")` instea
 This is the occurrence-control analogue of the CLAUDE.md "treeR is a Fixpoint"
 gotcha. If other multi-node proofs (InsSpec, makeCopy) hit the same wall, reach
 for `wp_unfold_node'`.
+
+## RESOLVED 2026-07-10: double-Node-Black CLOSED — all setRebalanceLeft defaults done
+
+The careful-debugging strategy worked end to end. The nested-unfold wall had TWO
+layers, both fixed in `wp_unfold_node'`:
+1. **Occurrence ambiguity** — goal-wide `rewrite _at_as_Rep` fires on the wrong
+   `as_Rep` when a competing one (sibling child) is in scope.
+2. **Full reduction** — a fully-concrete child tree `treeR (Node Red (Node
+   Black..) .. (Node Black..))` reduces eagerly to nested `as_Rep`, so any lemma
+   with a `treeR (Node …)`-headed LHS (`treeR_node`, `treeR_node_unfold`) no
+   longer matches and can't be refolded by unification.
+
+Both are killed by `iEval (rewrite _at_as_Rep) in H`: it targets only `H` (no
+occurrence ambiguity) and rewrites `H`'s CURRENT (reduced) form (no `treeR`-head
+requirement). Plus, a per-case detail: before unfolding one child, `iRename` the
+sibling's still-live child treeR out of the `_ntr` slot so the child unfold's
+fresh `_ntl/_ntr/_n*` don't clash.
+
+`setRebalanceLeft_ok`: all 7 DEFAULT (no-rotation) cases proved (RebalanceSpec
+22→15 admits). Remaining: LL/LR ROTATIONS (blocked on Phase D makeCopy) and the
+entire `setRebalanceRight_ok` mirror (which will reuse every tactic/pattern here
+verbatim, left/right swapped).
