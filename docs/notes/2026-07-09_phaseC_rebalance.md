@@ -368,3 +368,39 @@ color/struct, then default-path fold (outer `Node Black newL k v r`; inner newL
 re-fold with the appropriate child forms). The LL/LR ROTATION cases (~L576/581/
 587) remain blocked on Phase D (`makeCopy`). `setRebalanceRight_ok` (~L713+) is
 the full mirror.
+
+## PROGRESS 2026-07-09 (session 2, final): 6 default cases proved (RebalanceSpec 22→16)
+
+setRebalanceLeft_ok default cases all proved except one:
+- c=Red ✓; c=Black,newL=Leaf ✓; c=Black,newL=Node Black ✓;
+- 2b-Red both-children-Leaf ✓;
+- 2b-Red left=Leaf,right=Node Black ✓ (Some-Black is_red on unfolded right child);
+- 2b-Red left=Node Black,right=Leaf ✓ (mirror);
+- **2b-Red left=Node Black,right=Node Black — NOT done** (only remaining default).
+
+### The double-Node-Black case's open issue
+The full ~195-line proof was written (both children Node Black ⇒ both LL and LR
+checks are Some-Black is_red(sub2) on unfolded children). It builds through the
+guard + is_red(newLeft) but fails at `wp_unfold_node "_ntl"` (unfolding the LEFT
+child, which is `_lp |-> treeR (Node Black l_ll k_ll v_ll r_ll)`):
+`iExistDestruct: cannot destruct (_lp |-> as_Rep …)`. Because the child's
+[Node Black …] is a concrete constructor, its `treeR` is eagerly reduced to
+`as_Rep g`, and `wp_unfold_node`'s `rewrite _at_as_Rep` apparently doesn't fire
+on that already-reduced form (the CLAUDE.md `treeR` gotcha, but for the UNFOLD
+direction rather than the fold). In 2a/2b-Black/the two mixed cases, only ONE
+child needed unfolding and it worked because... [investigate: those unfolded the
+child via the tactic too — the difference may be that here `_ntl` was produced by
+the OUTER `wp_unfold_node "Htree_nl"` in already-`treeR`-applied form]. Fix
+direction (needs a faithful scratch, ~3s, NOT the ~20-min full build which this
+case pushed RebalanceSpec to): make a `wp_unfold_node_concrete` variant that does
+`iRevert H; rewrite treeR_node _at_as_Rep; iIntros H; iDestruct …` (explicit
+`treeR_node` first) for children with concrete-constructor trees. Then the
+double-Black case = the two mixed cases combined (left child re-folded right after
+its LL-check to free `_n*` for the right child's unfold, as already written in the
+reverted WIP).
+
+**Build-time warning:** RebalanceSpec.v full recheck is now ~18-20 min (6 large
+Iris proofs, whole-file recheck by coqc). Iterate new cases via a faithful
+scratch (RBTree/TreeRep/Tactics only, ~3s) per CLAUDE.md, NOT the full build.
+Remaining: the double-Black default case, all LL/LR ROTATIONS (blocked on Phase D
+makeCopy), and the entire `setRebalanceRight_ok` mirror.
