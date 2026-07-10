@@ -574,8 +574,191 @@ Proof using MOD MODULE.
               ** destruct c_rl.
                  --- (** [newL->right = Node Red ...] → LR rotation *)
                      admit.
-                 --- (** [newL->right = Node Black ...] → default *)
-                     admit.
+                 --- (** [newL->right = Node Black ...] → default (no rotation).
+                        newL = Node Red Leaf k_nl v_nl (Node Black ...). Guard
+                        true/true → body; LL is_red(sub2=left=null)=false; LR
+                        is_red(sub2=right=Node Black)=false (Some Black). *)
+                     iApply (wp_if source); iNext.
+                     rewrite /wp.WPE.wp_test /=.
+                     iApply wp_operand_seqand.
+                     rewrite /wp.WPE.wp_test /=.
+                     (** is_black(n) → true. *)
+                     wp_operand_call_direct1 "HMOD" is_black_lookup is_black_has_body
+                       is_black_name (is_black_ok MODULE) is_black_func
+                       "Hpn" (Vptr n_ptr) "Hstruct".
+                     rewrite /is_black_spec /=.
+                     iExists _, (Vptr n_ptr).
+                     iSplit; [ iPureIntro; reflexivity |].
+                     iSplitL "Hargp"; [ iFrame "Hargp" |].
+                     iExists n_ptr, (Some Black), (cQp.m 1).
+                     iSplit; [ iPureIntro; reflexivity |].
+                     iSplitL "Hcolor Hstruct".
+                     { rewrite _at_sep /=. iFrame "Hcolor Hstruct". }
+                     iIntros (ret) "Hpost".
+                     iIntros (rx) "(Hany & Hres)".
+                     wp_auto.
+                     wp_destroy_prim_temp "Hany".
+                     iModIntro; rewrite operand_receive.unlock /=.
+                     iExists (Vbool true).
+                     iFrame "Hres".
+                     simpl.
+                     iDestruct "Hpost" as "[Hpost _]".
+                     rewrite _at_sep /=.
+                     iDestruct "Hpost" as "[Hcolor Hstruct]".
+                     (** is_red(newLeft) → true (Node Red). Unfold newL. *)
+                     wp_unfold_node "Htree_nl".
+                     wp_operand_call_direct1 "HMOD" is_red_lookup is_red_has_body
+                       is_red_name (is_red_ok MODULE) is_red_func
+                       "Hpnl" (Vptr nl_ptr) "_nstruct".
+                     rewrite /is_red_spec /=.
+                     iExists _, (Vptr nl_ptr).
+                     iSplit; [ iPureIntro; reflexivity |].
+                     iSplitL "Hargp"; [ iFrame "Hargp" |].
+                     iExists nl_ptr, (Some Red), (cQp.m 1).
+                     iSplit; [ iPureIntro; reflexivity |].
+                     iSplitL "_ncolor _nstruct".
+                     { rewrite _at_sep /=. iFrame "_ncolor _nstruct". }
+                     iIntros (ret2) "Hpost2".
+                     iIntros (rx2) "(Hany2 & Hres2)".
+                     wp_auto.
+                     wp_destroy_prim_temp "Hany2".
+                     iModIntro; rewrite operand_receive.unlock /=.
+                     iExists (Vbool true).
+                     iFrame "Hres2".
+                     simpl.
+                     iDestruct "Hpost2" as "[Hpost2 _]".
+                     rewrite _at_sep /=.
+                     iDestruct "Hpost2" as "[_ncolor _nstruct]".
+                     (** newL->left = Leaf ⇒ _lp = nullptr. *)
+                     rewrite (_at_as_Rep _lp).
+                     iDestruct "_ntl" as "%Hlp_null". subst _lp.
+                     (** sub2 = newLeft->left (= nullptr). *)
+                     wp_auto.
+                     iIntros (sub2p).
+                     wp_read_field "Hpnl" (Vptr nl_ptr) "_nstruct" "_nleft" (Vptr nullptr).
+                     iIntros "Hsub2_local".
+                     wp_auto.
+                     (** LL-check is_red(sub2 = nullptr) → false. *)
+                     iApply (wp_if source); iNext.
+                     rewrite /wp.WPE.wp_test /=.
+                     wp_operand_call_direct1_null "HMOD" is_red_lookup is_red_has_body
+                       is_red_name (is_red_ok MODULE) is_red_func "Hsub2_local" "Hstruct".
+                     rewrite /is_red_spec /=.
+                     iExists _, (Vptr nullptr).
+                     iSplit; [ iPureIntro; reflexivity |].
+                     iSplitL "Hargp"; [ iFrame "Hargp" |].
+                     iExists nullptr, None, (cQp.m 1).
+                     iSplit; [ iPureIntro; reflexivity |].
+                     iSplitR; [ iPureIntro; reflexivity |].
+                     iIntros (ret3) "Hpost3".
+                     iIntros (rx3) "(Hany3 & Hres3)".
+                     wp_auto.
+                     wp_destroy_prim_temp "Hany3".
+                     iModIntro; rewrite operand_receive.unlock /=.
+                     iExists (Vbool false).
+                     iFrame "Hres3".
+                     simpl.
+                     (** sub2 = newLeft->right (= _rp, a Node Black). *)
+                     wp_auto.
+                     iApply wp_lval_assign.
+                     rewrite /=.
+                     wp_read_field "Hpnl" (Vptr nl_ptr) "_nstruct" "_nright" (Vptr _rp).
+                     wp_assign_local "Hsub2_local".
+                     iIntros "Hsub2_new".
+                     iDestruct (tptstoR_to_fuzzyR with "Hsub2_new") as "Hsub2_local".
+                     wp_auto.
+                     (** LR-check is_red(sub2 = _rp = Node Black) → false (Some
+                         Black). Rename newL's fields (free the [_n*] names), then
+                         unfold the right child to borrow its color/struct. *)
+                     iApply (wp_if source); iNext.
+                     rewrite /wp.WPE.wp_test /=.
+                     iRename "_nrc" into "L_nrc"; iRename "_ncolor" into "L_ncolor";
+                     iRename "_nkey" into "L_nkey"; iRename "_nval" into "L_nval";
+                     iRename "_nleft" into "L_nleft"; iRename "_nright" into "L_nright";
+                     iRename "_nstruct" into "L_nstruct".
+                     wp_unfold_node "_ntr".
+                     wp_operand_call_direct1 "HMOD" is_red_lookup is_red_has_body
+                       is_red_name (is_red_ok MODULE) is_red_func
+                       "Hsub2_local" (Vptr _rp) "_nstruct".
+                     rewrite /is_red_spec /=.
+                     iExists _, (Vptr _rp).
+                     iSplit; [ iPureIntro; reflexivity |].
+                     iSplitL "Hargp"; [ iFrame "Hargp" |].
+                     iExists _rp, (Some Black), (cQp.m 1).
+                     iSplit; [ iPureIntro; reflexivity |].
+                     iSplitL "_ncolor _nstruct".
+                     { rewrite _at_sep /=. iFrame "_ncolor _nstruct". }
+                     iIntros (ret4) "Hpost4".
+                     iIntros (rx4) "(Hany4 & Hres4)".
+                     wp_auto.
+                     wp_destroy_prim_temp "Hany4".
+                     iModIntro; rewrite operand_receive.unlock /=.
+                     iExists (Vbool false).
+                     iFrame "Hres4".
+                     simpl.
+                     iDestruct "Hpost4" as "[Hpost4 _]".
+                     rewrite _at_sep /=.
+                     iDestruct "Hpost4" as "[_ncolor _nstruct]".
+                     (** sub2 out of scope; destroy before outer default. *)
+                     wp_auto.
+                     wp_destroy_local "Hsub2_local".
+                     (** Re-fold the right child [Node Black l_rl .. r_rl] at [_rp]
+                         (its fields are the fresh [_n*] from [wp_unfold_node "_ntr"];
+                         its child ptrs are [_lp0/_rp0/_rc0], grandchildren
+                         [_ntl/_ntr]), then [newL = Node Red Leaf .. (Node Black ..)]
+                         at [nl_ptr] (newL's fields are the renamed [L_n*]). *)
+                     iPoseProof (treeR_node_fold _ Black l_rl k_rl v_rl r_rl
+                       _ _ _ _rp
+                       with "[$_ntl $_ntr $_nrc $_ncolor $_nkey $_nval $_nleft $_nright $_nstruct]")
+                       as "Htree_r_child".
+                     wp_revert_offset "L_nleft".
+                     wp_revert_offset "L_nright".
+                     iAssert (nl_ptr |-> treeR (cQp.m 1)
+                                (Node Red Leaf k_nl v_nl (Node Black l_rl k_rl v_rl r_rl)))%I
+                       with "[L_nrc L_ncolor L_nkey L_nval L_nleft L_nright L_nstruct Htree_r_child]"
+                       as "Htree_nl".
+                     { iApply (treeR_node_fold (cQp.m 1) Red Leaf k_nl v_nl
+                         (Node Black l_rl k_rl v_rl r_rl) nullptr _rp _rc nl_ptr).
+                       iSplitR; [ rewrite treeR_leaf _at_as_Rep; done |].
+                       iSplitL "Htree_r_child"; [ iExact "Htree_r_child" |].
+                       rewrite !_at_sep.
+                       iSplitL "L_nrc"; [ iExact "L_nrc" |].
+                       iSplitL "L_ncolor"; [ iExact "L_ncolor" |].
+                       iSplitL "L_nkey"; [ iExact "L_nkey" |].
+                       iSplitL "L_nval"; [ iExact "L_nval" |].
+                       iSplitL "L_nleft"; [ iExact "L_nleft" |].
+                       iSplitL "L_nright"; [ iExact "L_nright" |].
+                       iExact "L_nstruct". }
+                     (** Default path. *)
+                     wp_auto.
+                     iIntros (addr).
+                     wp_read_local "Hpn" (Vptr n_ptr).
+                     iIntros "Hres_local".
+                     wp_auto.
+                     wp_assign_setup.
+                     wp_read_local "Hpnl" (Vptr nl_ptr).
+                     wp_offset "Hleft".
+                     wp_assign_member_field "Hres_local" (Vptr n_ptr) "Hstruct" "Hleft".
+                     iIntros "Hleft_new".
+                     wp_auto.
+                     iIntros (retp).
+                     wp_read_local "Hres_local" (Vptr n_ptr).
+                     iIntros "Hret_store".
+                     wp_auto.
+                     wp_destroy_local "Hres_local".
+                     wp_field_to_primR "Hleft_new" "Hleft2" (Vptr nl_ptr) I.
+                     iPoseProof (treeR_node_fold _ Black
+                       (Node Red Leaf k_nl v_nl (Node Black l_rl k_rl v_rl r_rl))
+                       k v r nl_ptr rp rc n_ptr
+                       with "[$Htree_nl $Htree_r $Hrc $Hcolor $Hkey $Hval $Hleft2 $Hright $Hstruct]")
+                       as "Htree".
+                     iPoseProof ("Hcont" $! n_ptr with "[Htree]") as "Hc".
+                     { rewrite /setRebalanceLeft /=. iExact "Htree". }
+                     repeat wp_step.
+                     iApply ("Hc" $! retp with "[Hpn Hpnl Hret_store]").
+                     iFrame "Hret_store".
+                     iSplitL "Hpn"; [ rewrite anyR_tptsto_fuzzyR_val_2; [ iFrame "Hpn" | done ] |].
+                     rewrite anyR_tptsto_fuzzyR_val_2; [ iFrame "Hpnl" | done ].
            ++ destruct c_ll.
               ** (** [newL->left = Node Red ...] → LL rotation *)
                  admit.
