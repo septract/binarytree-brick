@@ -328,3 +328,43 @@ from the pattern above. The other 2b-Red default sub-cases (`newL->left=Node
 Black`, `newL->right=Node Black`, etc.) mirror it with a non-null `is_red(sub2)`
 (Some Black) instead of the null one. Rotation (LL/LR) cases remain blocked on
 Phase D (`makeCopy`).
+
+## PROGRESS 2026-07-09 (session 2, cont.): 2b-Red both-Leaf CLOSED — treeR fold gotcha solved
+
+The both-children-Leaf 2b-Red case is now fully proved (RebalanceSpec 19→18
+admits). The `treeR` fixpoint-reduction fold gotcha is SOLVED (found via a
+3-second faithful scratch, `ScratchFold.v`, since deleted):
+
+**Folding `Node c` with reduced (`as_Rep`) `Leaf` children** — `iFrame` fails
+(the `1$m` = `cQp.m 1` hyp form differs from the fold's `q` via the non-identity
+coercion path `cQp.frac; cQp._mut`; see the build warning), but `iExact` matches
+up-to-definitional. Working pattern:
+```coq
+iApply (treeR_node_fold (cQp.m 1) c l k v r lp rp rc p).
+iSplitR; [ rewrite treeR_leaf _at_as_Rep; done |].   (* left Leaf child  *)
+iSplitR; [ rewrite treeR_leaf _at_as_Rep; done |].   (* right Leaf child *)
+rewrite !_at_sep.                                    (* split p|->(f1∗f2∗…) *)
+iSplitL "Hf1"; [ iExact "Hf1" |]. … ; iExact "Hlast" (* fields via iExact  *)
+```
+When a child is a live non-Leaf `treeR` hyp (e.g. the outer fold in 2b cases),
+`iFrame`/`$` works normally — the issue is specific to freshly-materialised Leaf
+children.
+
+Also learned: **`sub2` (the rotation-body local) is destroyed at the END of the
+rotation-body `Sseq`**, before the outer default sequence — so `wp_destroy_local
+"Hsub2_local"` must come right after the LR-check short-circuit, NOT interleaved
+with the outer `res` handling.
+
+### Remaining default sub-cases (all mechanical, same patterns)
+- `newL=Node Red, left=Leaf, right=Node Black` (RebalanceSpec ~L578): LL null →
+  false; LR `is_red(sub2=right=Node Black)` → false via Some-Black (unfold the
+  right child `_ntr` to borrow its color/struct).
+- `newL=Node Red, left=Node Black, right=Leaf` (~L585): LL Some-Black false; LR
+  null false.
+- `newL=Node Red, left=Node Black, right=Node Black` (~L590): both Some-Black.
+Each combines: guard true/true, sub2 read/reassign, one null + one Some-Black
+`is_red(sub2)` (or two Some-Black), unfold the relevant child to borrow its
+color/struct, then default-path fold (outer `Node Black newL k v r`; inner newL
+re-fold with the appropriate child forms). The LL/LR ROTATION cases (~L576/581/
+587) remain blocked on Phase D (`makeCopy`). `setRebalanceRight_ok` (~L713+) is
+the full mirror.
