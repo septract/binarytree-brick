@@ -1138,6 +1138,70 @@ Ltac wp_operand_call_direct1 HMOD lookup body fname fok func_def H_local vp H_st
      is_black then is_red guard calls) doesn't clash on these names *)
   iClear "_rt _val _call_ca _call_fok".
 
+(** Like [wp_operand_call_direct1] but for a call whose single argument is the
+    NULL pointer (e.g. [is_red(sub2)] with [sub2 = nullptr], arg cast to a
+    [const Node] pointer).
+
+    Differs only in the [has_type (Vptr nullptr) (Tptr ..)] discharge: there is no
+    [structR] at the null pointer, so [valid_ptr] comes from [valid_ptr_nullptr]
+    and the alignment reuses [align_of (Tnamed cls)] — a GLOBAL fact witnessed by
+    any live [structR cls _] (passed as [H_align]) via [reference_to_elim] (which
+    yields [align_of (Tnamed cls) = Some a]); [aligned_ptr a nullptr] then holds
+    since [ptr_vaddr nullptr = Some 0] and [a | 0].
+
+    [H_local] holds [tptsto_fuzzyR (Tptr _) _ (Vptr nullptr)]; [H_align] holds
+    [_ |-> structR cls _] for the SAME class [cls] as the argument's pointee. *)
+Ltac wp_operand_call_direct1_null HMOD lookup body fname fok func_def H_local H_align :=
+  iApply wp_operand_call;
+    rewrite /wp_call /=;
+    iIntros "%";
+    rewrite /wp.WPE.Mbind /wp.WPE.Mmap /=;
+  iApply wp_operand_cfun2ptr_global; [ exact lookup | exact body | ];
+  iSplitL HMOD; [ iExact HMOD | ];
+  iExists (_global fname);
+  iSplit; [ iPureIntro; reflexivity | ];
+  rewrite /wp.WPE.nd_seqs /=;
+  iIntros (? ? ?) "%Hndeq";
+  (match goal with Hndeq : _ = ?pre ++ _ :: _ |- _ =>
+     destruct pre as [| ?x0 [| ?x1 ?rest]]; simpl in Hndeq; try congruence
+   end);
+  (match goal with Hndeq : _ = _ |- _ =>
+     injection Hndeq; clear Hndeq; intros; subst; simpl
+   end);
+  rewrite /wp.WPE.Mbind /call.wp_arg /=;
+  iIntros (?);
+  rewrite /wp_initialize /qual_norm /=;
+  try rewrite wp_initialize_unqualified.unlock /=;
+  iApply wp_operand_cast_noop;
+  wp_read_local H_local (Vptr nullptr);
+  iDestruct (observe (reference_to _ _) with H_align) as "#_rtn";
+  iDestruct (reference_to_elim with "_rtn") as "(%Halign_cdn & %Hnn_cdn & _)";
+  iSplitR;
+  [ rewrite has_type_ptr';
+    iSplitR; [ iApply valid_ptr_nullptr | ];
+    iPureIntro; rewrite aligned_ptr_ty_erase_qualifiers /=;
+    (match goal with H : aligned_ptr_ty _ _ |- _ =>
+       destruct H as (? & ? & _) end);
+    eexists; split; [ eassumption | ];
+    left; exists 0%N; rewrite ptr_vaddr_nullptr; split;
+      [ reflexivity | apply N.divide_0_r ]
+  | ];
+  (try match goal with H : aligned_ptr_ty _ _ |- _ => clear H end);
+  (try match goal with H : _ <> nullptr |- _ => clear H end);
+  iClear "_rtn";
+  iIntros "Hargp";
+  rewrite /wp.WPE.Mmap /wp.WPE.Mret /=;
+  iNext;
+  iPoseProof (code_at_of_denoteModule _ _ _ lookup body with HMOD) as "#_call_ca";
+  iPoseProof fok as "#_call_fok";
+  (match goal with |- context[wp_fptr _ ?ft _ _ _] =>
+     replace ft with (type_of_value (Ofunction func_def)) by (vm_compute; reflexivity)
+   end);
+  iApply (wp_fptr_of_func_ok_compat _ _ _ _ _ _ (tu_compat));
+  iSplitR; [ iExact "_call_ca" | ];
+  iSplitR; [ iExact "_call_fok" | ];
+  iClear "_call_ca _call_fok".
+
 (* ================================================================= *)
 (** ** Layer 3: Meta-Tactics *)
 (* ================================================================= *)

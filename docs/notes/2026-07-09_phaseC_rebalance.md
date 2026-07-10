@@ -286,3 +286,45 @@ else branch → default path via `setRebalanceLeft_default` + `treeR_node_fold`.
 - Default path fold: `setRebalanceLeft_default` (RebalanceSpec.v:80) +
   `treeR_node_fold` (Tactics.v).
 - `treeR_leaf_implies_null`, `treeR_node_nonnull` for the `newL` case analysis.
+
+## PROGRESS 2026-07-09 (session 2): 3 default cases proved + 2 reusable tactics
+
+Proved (all `Qed`-clean, committed):
+- **Case 1** `c=Red` — commit `2f05b3c`.
+- **Case 2a** `c=Black, newL=Leaf` — commit (Case 2a): is_black=true then
+  is_red(newLeft=null)=false. First null-argument is_red.
+- **Case 2b-Black** `c=Black, newL=Node Black …` — is_red(newLeft)=false via the
+  `Some Black` precond (borrows newL's `_color+structR` after `wp_unfold_node`).
+
+Extracted into `WpTactics.v` (both generic, re-entrant — validated by two uses
+in one proof):
+- **`wp_operand_call_direct1 HMOD lookup body fname fok func_def H_local vp H_struct`**
+  — resolve `f((const T*) local)` in operand/test position → callee `fs_spec`
+  precondition. Discharges the `Cnoop` `has_type` from `H_struct`'s `structR`.
+- **`wp_operand_call_direct1_null HMOD lookup body fname fok func_def H_local H_align`**
+  — same but the argument is `nullptr` (e.g. `is_red(sub2)` with `sub2=null`):
+  `has_type` from `valid_ptr_nullptr` + `align_of` witnessed by any live
+  `structR` (`H_align`).
+Both `iClear` their persistent intermediates + clear the pure `aligned_ptr_ty`/
+`<>nullptr` facts so a proof can call them multiple times without name clashes;
+the tu-models premise is dropped with an anonymous `iIntros "%"`.
+
+### Case 2b-Red default sub-cases — status
+`newL = Node Red …` with neither child Red enters the rotation BODY (guard
+`true && true`), then reads `sub2 = newLeft->left`, `is_red(sub2)` (LL-check),
+`sub2 = newLeft->right`, `is_red(sub2)` (LR-check); both false ⇒ fall to the
+trailing default. The **both-children-Leaf** sub-case is fully worked out and
+builds through both rotation-check short-circuits (using
+`wp_operand_call_direct1_null` for the two null `is_red(sub2)` calls, and
+`wp_lval_assign`+`wp_assign_local` for the `sub2 = newLeft->right` reassignment)
+— the ONLY open step is the final re-fold of `newL = Node Red Leaf k_nl v_nl
+Leaf`: its Leaf children are stored reduced (`nullptr |-> as_Rep …`) and don't
+syntactically frame against `treeR_node_fold`'s `treeR q Leaf` child slots (the
+CLAUDE.md `treeR` fixpoint gotcha). Fix next session via the faithful-scratch
+loop to get the child form to match (likely `rewrite -treeR_leaf` on the slot,
+or fold with the children provided as `treeR q Leaf` before reduction). The full
+proof body is preserved in git history (this commit's parent WIP) / reconstruct
+from the pattern above. The other 2b-Red default sub-cases (`newL->left=Node
+Black`, `newL->right=Node Black`, etc.) mirror it with a non-null `is_red(sub2)`
+(Some Black) instead of the null one. Rotation (LL/LR) cases remain blocked on
+Phase D (`makeCopy`).
