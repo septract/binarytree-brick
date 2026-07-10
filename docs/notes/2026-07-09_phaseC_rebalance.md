@@ -498,3 +498,27 @@ wp_srl_default→wp_srr_default, and the newR subtree in the folds):
   2b-Red default sub-cases — the sub2=left is the RL check, sub2=right the RR).
 RR/RL ROTATION cases stay blocked on Phase D (makeCopy). RebalanceSpec: 13 admits
 (9 rotations across both fns + a few) remain.
+
+## COMPLETE 2026-07-10 (session 4 end): all rebalance DEFAULT cases proved
+
+Answer to "do we need to finish the mirror?": strictly `setRebalanceRight_ok`
+stays `Admitted` regardless (its RR/RL rotations need Phase D), but leaving the
+mirror half-done was an asymmetric, stale state — so we finished all its DEFAULT
+cases. Both `setRebalanceLeft_ok` and `setRebalanceRight_ok` now have ALL 7
+default (no-rotation) cases proved. RebalanceSpec: 22 → 8 admits, and the 8 that
+remain are EXACTLY the LL/LR/RL/RR rotation cases (4 per function... actually the
+non-rotating structure leaves the true rotation branches), all blocked on Phase D
+(makeCopy + ref-count/COW).
+
+The refactor paid off: with wp_guard_isblack_true/false, wp_srl_default/
+wp_srr_default, wp_operand_call_direct1(_null), and wp_unfold_node', each default
+case is now the guard opener + the case-specific is_red(sub2) checks + a
+one-line tail. The setRebalanceRight defaults mirror the setRebalanceLeft ones
+directly (sub2 read order left-then-right in both).
+
+**Build-time caveat (important for the next session):** RebalanceSpec.v is now
+~1700 lines of dense Iris and a full `coqc` recheck takes ~70 min. Do NOT iterate
+new cases against it — use a ~3s faithful scratch (RBTree/TreeRep/Tactics only)
+to nail any tactic first. If more rebalance work is needed, consider splitting
+the file. NEXT real frontier: Phase D (makeCopy/RefCount) — the sole gate for the
+rotation cases here AND for ins_ok.
