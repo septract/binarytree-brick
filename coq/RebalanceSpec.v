@@ -161,6 +161,40 @@ Ltac wp_guard_isblack_true np :=
   rewrite _at_sep /=;
   iDestruct "Hpost" as "[Hcolor Hstruct]".
 
+(** [wp_guard_isblack_false np] — the [c = Red] opener (both rebalance fns):
+    enter [Sif (Eseqand (is_black n) …)], evaluate [is_black(n)] to [false] (the
+    node is Red), which SHORT-CIRCUITS the [Eseqand] (no [is_red] call), then
+    recover the node's [_color]/[structR]. After it, [Hcolor]/[Hstruct] are back
+    and the goal is the [Sif] else (default) branch. *)
+Ltac wp_guard_isblack_false np :=
+  let ret := fresh "ret" in
+  let rx := fresh "rx" in
+  iApply (wp_if source); iNext;
+  rewrite /wp.WPE.wp_test /=;
+  iApply wp_operand_seqand;
+  rewrite /wp.WPE.wp_test /=;
+  wp_operand_call_direct1 "HMOD" is_black_lookup is_black_has_body
+    is_black_name (is_black_ok MODULE) is_black_func
+    "Hpn" (Vptr np) "Hstruct";
+  rewrite /is_black_spec /=;
+  iExists _, (Vptr np);
+  iSplit; [ iPureIntro; reflexivity |];
+  iSplitL "Hargp"; [ iFrame "Hargp" |];
+  iExists np, (Some Red), (cQp.m 1);
+  iSplit; [ iPureIntro; reflexivity |];
+  iSplitL "Hcolor Hstruct"; [ rewrite _at_sep /=; iFrame "Hcolor Hstruct" |];
+  iIntros (ret) "Hpost";
+  iIntros (rx) "(Hany & Hres)";
+  wp_auto;
+  wp_destroy_prim_temp "Hany";
+  iModIntro; rewrite operand_receive.unlock /=;
+  iExists (Vbool false);
+  iFrame "Hres";
+  simpl;
+  iDestruct "Hpost" as "[Hpost _]";
+  rewrite _at_sep /=;
+  iDestruct "Hpost" as "[Hcolor Hstruct]".
+
 (** ** Main proof: setRebalanceLeft_ok
 
     Proof structure: case-split on [(c, newL)] to match the functional
@@ -215,45 +249,8 @@ Proof using MOD MODULE.
         For now, admit the Eseqand + is_black/is_red call handling and
         case-split at the functional level to validate the spec shape. *)
     destruct c.
-    + (** Case 1: [c = Red] → default path. *)
-      iApply (wp_if source); iNext.
-      rewrite /wp.WPE.wp_test /=.
-      iApply wp_operand_seqand.
-      rewrite /wp.WPE.wp_test /=.
-      (** Evaluate the guard's first operand [is_black(n)] (arg cast to const
-          Node ptr) as a direct call to [is_black_ok], down to its precondition. *)
-      wp_operand_call_direct1 "HMOD" is_black_lookup is_black_has_body
-        is_black_name (is_black_ok MODULE) is_black_func
-        "Hpn" (Vptr n_ptr) "Hstruct".
-      (** Provide [is_black_spec] precond: arg [argp]→[n_ptr], ghost [Some Red],
-          resources [Hcolor]+[Hstruct] assembled into the [_color ∗ structR]
-          conjunct; received back (read-only) in the post. *)
-      rewrite /is_black_spec /=.
-      iExists _, (Vptr n_ptr).
-      iSplit; [ iPureIntro; reflexivity |].
-      iSplitL "Hargp"; [ iFrame "Hargp" |].
-      iExists n_ptr, (Some Red), (cQp.m 1).
-      iSplit; [ iPureIntro; reflexivity |].
-      iSplitL "Hcolor Hstruct".
-      { rewrite _at_sep /=. iFrame "Hcolor Hstruct". }
-      (** Receive the color resources back + the [is_black]=false result. *)
-      iIntros (ret) "Hpost".
-      iIntros (rx) "(Hany & Hres)".
-      wp_auto.
-      wp_destroy_prim_temp "Hany".
-      iModIntro; rewrite operand_receive.unlock /=.
-      iExists (Vbool false).
-      iFrame "Hres".
-      (** [is_black]=false ⇒ [is_true (Vbool false) = Some false] ⇒ [Eseqand]
-          short-circuits (no [is_red] call) ⇒ guard is false ⇒ [Sif] else. *)
-      simpl.
-      (** Recover the [_color]/[structR] resources from the read-only post
-          (now at the concrete fraction [cQp.m 1] we lent — no opaque existential). *)
-      iDestruct "Hpost" as "[Hpost _]".
-      rewrite _at_sep /=.
-      iDestruct "Hpost" as "[Hcolor Hstruct]".
-      (** Default tail: [res = n; res->left = newLeft; return res], folding
-          [Node Red newL k v r]. (c=Red arm; [newL] still the generic subtree.) *)
+    + (** Case 1: [c = Red] → is_black(n)=false short-circuits ⇒ default path. *)
+      wp_guard_isblack_false n_ptr.
       wp_srl_default Red newL n_ptr nl_ptr k v r rp rc.
     + (** Case 2: [c = Black] → check newL *)
       destruct newL as [| c_nl l_nl k_nl v_nl r_nl].
@@ -1219,7 +1216,9 @@ Proof using MOD MODULE.
     wp_auto.
     (** Case split mirrors setRebalanceLeft *)
     destruct c.
-    + (* c = Red: default *) admit.
+    + (** c = Red: is_black(n)=false short-circuits ⇒ default. *)
+      wp_guard_isblack_false n_ptr.
+      wp_srr_default Red newR n_ptr nr_ptr k v l lp rc.
     + destruct newR as [| c_nr l_nr k_nr v_nr r_nr].
       * (* newR = Leaf: default *) admit.
       * destruct c_nr.
@@ -1237,7 +1236,37 @@ Proof using MOD MODULE.
                  --- destruct c_rr.
                      +++ (* RR rotation *) admit.
                      +++ (* default *) admit.
-        -- (* Node Black: default *) admit.
+        -- (** newR = Node Black ...: is_black(n)=true, is_red(newRight)=false
+              (Black) ⇒ default. Mirror of setRebalanceLeft 2b-Black. *)
+           wp_guard_isblack_true n_ptr.
+           wp_unfold_node "Htree_nr".
+           wp_operand_call_direct1 "HMOD" is_red_lookup is_red_has_body
+             is_red_name (is_red_ok MODULE) is_red_func
+             "Hpnr" (Vptr nr_ptr) "_nstruct".
+           rewrite /is_red_spec /=.
+           iExists _, (Vptr nr_ptr).
+           iSplit; [ iPureIntro; reflexivity |].
+           iSplitL "Hargp"; [ iFrame "Hargp" |].
+           iExists nr_ptr, (Some Black), (cQp.m 1).
+           iSplit; [ iPureIntro; reflexivity |].
+           iSplitL "_ncolor _nstruct".
+           { rewrite _at_sep /=. iFrame "_ncolor _nstruct". }
+           iIntros (ret2) "Hpost2".
+           iIntros (rx2) "(Hany2 & Hres2)".
+           wp_auto.
+           wp_destroy_prim_temp "Hany2".
+           iModIntro; rewrite operand_receive.unlock /=.
+           iExists (Vbool false).
+           iFrame "Hres2".
+           simpl.
+           iDestruct "Hpost2" as "[Hpost2 _]".
+           rewrite _at_sep /=.
+           iDestruct "Hpost2" as "[_ncolor _nstruct]".
+           (** Re-fold [newR = Node Black l_nr k_nr v_nr r_nr] at [nr_ptr]. *)
+           iPoseProof (treeR_node_fold _ Black l_nr k_nr v_nr r_nr _lp _rp _rc nr_ptr
+             with "[$_ntl $_ntr $_nrc $_ncolor $_nkey $_nval $_nleft $_nright $_nstruct]")
+             as "Htree_nr".
+           wp_srr_default Black (Node Black l_nr k_nr v_nr r_nr) n_ptr nr_ptr k v l lp rc.
 Admitted.
 
 End with_Sigma.
