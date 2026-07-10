@@ -198,3 +198,91 @@ Ltac wp_unfold_node' H :=
 Ltac wp_field_to_primR H_src H_dst v Hpure :=
   iPoseProof (tptstoR_to_primR _ _ _ v Hpure with H_src) as H_dst;
   wp_revert_offset H_dst.
+
+(** [wp_srl_default c newLtree] — the shared "default" (no-rotation) tail of
+    every [setRebalanceLeft_ok] case.
+
+    After the [Eseqand] guard has been evaluated to false (so the [Sif] takes the
+    else branch), this runs the C++ default block
+    [res = n; res->left = newLeft; return res], folds the result into
+    [n_ptr |-> treeR (Node c newLtree k v r)], and discharges the continuation.
+
+    Requires (all with STABLE names from the [setRebalanceLeft_ok] prologue and
+    the per-case newL handling):
+    - [Htree_nl : nl_ptr |-> treeR (cQp.m 1) newLtree]  (newL already re-folded)
+    - the [n]-node fields [Hrc Hcolor Hkey Hval Hleft Hright Hstruct]
+    - [Htree_r : rp |-> treeR (cQp.m 1) r]
+    - the locals/cont [Hpn], [Hpnl], [Hcont]
+    - Coq vars [n_ptr nl_ptr k v r rp rc] in scope.
+
+    [c] is the node colour, [newLtree] the left subtree term; the remaining args
+    are the (stable-named, but Ltac needs them passed) Coq vars from the prologue:
+    node ptr [np], left-child ptr [nlp], key [k], value [v], right subtree [r],
+    right-child ptr [rp], ref-count [rc]. *)
+Ltac wp_srl_default c newLtree np nlp k v r rp rc :=
+  let addr := fresh "addr" in
+  let retp := fresh "retp" in
+  wp_auto;
+  iIntros (addr);
+  wp_read_local "Hpn" (Vptr np);
+  iIntros "Hres_local";
+  wp_auto;
+  wp_assign_setup;
+  wp_read_local "Hpnl" (Vptr nlp);
+  wp_offset "Hleft";
+  wp_assign_member_field "Hres_local" (Vptr np) "Hstruct" "Hleft";
+  iIntros "Hleft_new";
+  wp_auto;
+  iIntros (retp);
+  wp_read_local "Hres_local" (Vptr np);
+  iIntros "Hret_store";
+  wp_auto;
+  wp_destroy_local "Hres_local";
+  wp_field_to_primR "Hleft_new" "Hleft2" (Vptr nlp) I;
+  iPoseProof (treeR_node_fold _ c newLtree k v r nlp rp rc np
+    with "[$Htree_nl $Htree_r $Hrc $Hcolor $Hkey $Hval $Hleft2 $Hright $Hstruct]")
+    as "Htree";
+  iPoseProof ("Hcont" $! np with "[Htree]") as "Hc";
+  [ rewrite /setRebalanceLeft /=; iExact "Htree"
+  | repeat wp_step;
+    iApply ("Hc" $! retp with "[Hpn Hpnl Hret_store]");
+    iFrame "Hret_store";
+    iSplitL "Hpn"; [ rewrite anyR_tptsto_fuzzyR_val_2; [ iFrame "Hpn" | done ] |];
+    rewrite anyR_tptsto_fuzzyR_val_2; [ iFrame "Hpnl" | done ] ].
+
+(** [wp_srr_default c newRtree] — mirror of [wp_srl_default] for
+    [setRebalanceRight_ok] (right/left swapped: [nr_ptr], [Hpnr], [_right],
+    [Htree_l], fold [Node c l k v newRtree], unfold [setRebalanceRight]).
+    Args: colour [c], right subtree [newRtree], node ptr [np], right-child ptr
+    [nrp], key [k], value [v], left subtree [l], left-child ptr [lp], ref-count
+    [rc]. *)
+Ltac wp_srr_default c newRtree np nrp k v l lp rc :=
+  let addr := fresh "addr" in
+  let retp := fresh "retp" in
+  wp_auto;
+  iIntros (addr);
+  wp_read_local "Hpn" (Vptr np);
+  iIntros "Hres_local";
+  wp_auto;
+  wp_assign_setup;
+  wp_read_local "Hpnr" (Vptr nrp);
+  wp_offset "Hright";
+  wp_assign_member_field "Hres_local" (Vptr np) "Hstruct" "Hright";
+  iIntros "Hright_new";
+  wp_auto;
+  iIntros (retp);
+  wp_read_local "Hres_local" (Vptr np);
+  iIntros "Hret_store";
+  wp_auto;
+  wp_destroy_local "Hres_local";
+  wp_field_to_primR "Hright_new" "Hright2" (Vptr nrp) I;
+  iPoseProof (treeR_node_fold _ c l k v newRtree lp nrp rc np
+    with "[$Htree_l $Htree_nr $Hrc $Hcolor $Hkey $Hval $Hleft $Hright2 $Hstruct]")
+    as "Htree";
+  iPoseProof ("Hcont" $! np with "[Htree]") as "Hc";
+  [ rewrite /setRebalanceRight /=; iExact "Htree"
+  | repeat wp_step;
+    iApply ("Hc" $! retp with "[Hpn Hpnr Hret_store]");
+    iFrame "Hret_store";
+    iSplitL "Hpn"; [ rewrite anyR_tptsto_fuzzyR_val_2; [ iFrame "Hpn" | done ] |];
+    rewrite anyR_tptsto_fuzzyR_val_2; [ iFrame "Hpnr" | done ] ].
