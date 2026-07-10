@@ -1220,12 +1220,148 @@ Proof using MOD MODULE.
       wp_guard_isblack_false n_ptr.
       wp_srr_default Red newR n_ptr nr_ptr k v l lp rc.
     + destruct newR as [| c_nr l_nr k_nr v_nr r_nr].
-      * (* newR = Leaf: default *) admit.
+      * (** newR = Leaf → default. is_black(n)=true, is_red(newRight=null)=false.
+            Mirror of setRebalanceLeft Case 2a. *)
+        wp_guard_isblack_true n_ptr.
+        (** [newR = Leaf] ⇒ [nr_ptr = nullptr]. *)
+        rewrite _at_as_Rep.
+        iDestruct "Htree_nr" as "%Hnr_null". subst nr_ptr.
+        (** [wp_guard_isblack_true] already left us at the SECOND [Eseqand] operand
+            [is_red(newRight)] (no fresh [Sif]); evaluate it with the null arg. *)
+        wp_operand_call_direct1_null "HMOD" is_red_lookup is_red_has_body
+          is_red_name (is_red_ok MODULE) is_red_func "Hpnr" "Hstruct".
+        rewrite /is_red_spec /=.
+        iExists _, (Vptr nullptr).
+        iSplit; [ iPureIntro; reflexivity |].
+        iSplitL "Hargp"; [ iFrame "Hargp" |].
+        iExists nullptr, None, (cQp.m 1).
+        iSplit; [ iPureIntro; reflexivity |].
+        iSplitR; [ iPureIntro; reflexivity |].
+        iIntros (ret2) "Hpost2".
+        iIntros (rx2) "(Hany2 & Hres2)".
+        wp_auto.
+        wp_destroy_prim_temp "Hany2".
+        iModIntro; rewrite operand_receive.unlock /=.
+        iExists (Vbool false).
+        iFrame "Hres2".
+        simpl.
+        (** Re-establish [nullptr |-> treeR Leaf] for the fold. *)
+        iAssert (nullptr |-> treeR (cQp.m 1) (Leaf (K:=Z) (V:=Z)))%I as "Htree_nr".
+        { rewrite treeR_leaf _at_as_Rep. done. }
+        wp_srr_default Black (Leaf (K:=Z) (V:=Z)) n_ptr nullptr k v l lp rc.
       * destruct c_nr.
         -- (* Node Red: check RL/RR *)
            destruct l_nr as [| c_ll l_ll k_ll v_ll r_ll].
            ++ destruct r_nr as [| c_rr l_rr k_rr v_rr r_rr].
-              ** (* Both Leaf: default *) admit.
+              ** (** newR = Node Red Leaf .. Leaf → default. is_red(newRight)=true
+                    enters body; RL is_red(sub2=newRight->left=null)=false, RR
+                    is_red(sub2=newRight->right=null)=false. Mirror of SRL
+                    2b-Red both-Leaf. *)
+                 wp_guard_isblack_true n_ptr.
+                 (** is_red(newRight) → true (Node Red). Unfold newR. *)
+                 wp_unfold_node "Htree_nr".
+                 wp_operand_call_direct1 "HMOD" is_red_lookup is_red_has_body
+                   is_red_name (is_red_ok MODULE) is_red_func
+                   "Hpnr" (Vptr nr_ptr) "_nstruct".
+                 rewrite /is_red_spec /=.
+                 iExists _, (Vptr nr_ptr).
+                 iSplit; [ iPureIntro; reflexivity |].
+                 iSplitL "Hargp"; [ iFrame "Hargp" |].
+                 iExists nr_ptr, (Some Red), (cQp.m 1).
+                 iSplit; [ iPureIntro; reflexivity |].
+                 iSplitL "_ncolor _nstruct".
+                 { rewrite _at_sep /=. iFrame "_ncolor _nstruct". }
+                 iIntros (ret2) "Hpost2".
+                 iIntros (rx2) "(Hany2 & Hres2)".
+                 wp_auto.
+                 wp_destroy_prim_temp "Hany2".
+                 iModIntro; rewrite operand_receive.unlock /=.
+                 iExists (Vbool true).
+                 iFrame "Hres2".
+                 simpl.
+                 iDestruct "Hpost2" as "[Hpost2 _]".
+                 rewrite _at_sep /=.
+                 iDestruct "Hpost2" as "[_ncolor _nstruct]".
+                 (** [newR->left = Leaf] ⇒ [_lp = nullptr]; likewise [_rp]. *)
+                 rewrite (_at_as_Rep _lp) (_at_as_Rep _rp).
+                 iDestruct "_ntl" as "%Hlp_null".
+                 iDestruct "_ntr" as "%Hrp_null".
+                 subst _lp _rp.
+                 (** [sub2 = newRight->left] (= nullptr). *)
+                 wp_auto.
+                 iIntros (sub2p).
+                 wp_read_field "Hpnr" (Vptr nr_ptr) "_nstruct" "_nleft" (Vptr nullptr).
+                 iIntros "Hsub2_local".
+                 wp_auto.
+                 (** RL-check [is_red(sub2 = nullptr)] → false. *)
+                 iApply (wp_if source); iNext.
+                 rewrite /wp.WPE.wp_test /=.
+                 wp_operand_call_direct1_null "HMOD" is_red_lookup is_red_has_body
+                   is_red_name (is_red_ok MODULE) is_red_func "Hsub2_local" "Hstruct".
+                 rewrite /is_red_spec /=.
+                 iExists _, (Vptr nullptr).
+                 iSplit; [ iPureIntro; reflexivity |].
+                 iSplitL "Hargp"; [ iFrame "Hargp" |].
+                 iExists nullptr, None, (cQp.m 1).
+                 iSplit; [ iPureIntro; reflexivity |].
+                 iSplitR; [ iPureIntro; reflexivity |].
+                 iIntros (ret3) "Hpost3".
+                 iIntros (rx3) "(Hany3 & Hres3)".
+                 wp_auto.
+                 wp_destroy_prim_temp "Hany3".
+                 iModIntro; rewrite operand_receive.unlock /=.
+                 iExists (Vbool false).
+                 iFrame "Hres3".
+                 simpl.
+                 (** [sub2 = newRight->right] (= nullptr): reassign. *)
+                 wp_auto.
+                 iApply wp_lval_assign.
+                 rewrite /=.
+                 wp_read_field "Hpnr" (Vptr nr_ptr) "_nstruct" "_nright" (Vptr nullptr).
+                 wp_assign_local "Hsub2_local".
+                 iIntros "Hsub2_new".
+                 iDestruct (tptstoR_to_fuzzyR with "Hsub2_new") as "Hsub2_local".
+                 wp_auto.
+                 (** RR-check [is_red(sub2 = nullptr)] → false. *)
+                 iApply (wp_if source); iNext.
+                 rewrite /wp.WPE.wp_test /=.
+                 wp_operand_call_direct1_null "HMOD" is_red_lookup is_red_has_body
+                   is_red_name (is_red_ok MODULE) is_red_func "Hsub2_local" "Hstruct".
+                 rewrite /is_red_spec /=.
+                 iExists _, (Vptr nullptr).
+                 iSplit; [ iPureIntro; reflexivity |].
+                 iSplitL "Hargp"; [ iFrame "Hargp" |].
+                 iExists nullptr, None, (cQp.m 1).
+                 iSplit; [ iPureIntro; reflexivity |].
+                 iSplitR; [ iPureIntro; reflexivity |].
+                 iIntros (ret4) "Hpost4".
+                 iIntros (rx4) "(Hany4 & Hres4)".
+                 wp_auto.
+                 wp_destroy_prim_temp "Hany4".
+                 iModIntro; rewrite operand_receive.unlock /=.
+                 iExists (Vbool false).
+                 iFrame "Hres4".
+                 simpl.
+                 wp_auto.
+                 wp_destroy_local "Hsub2_local".
+                 (** Re-fold [newR = Node Red Leaf .. Leaf] at [nr_ptr]. *)
+                 wp_revert_offset "_nleft".
+                 wp_revert_offset "_nright".
+                 iAssert (nr_ptr |-> treeR (cQp.m 1) (Node Red Leaf k_nr v_nr Leaf))%I
+                   with "[_nrc _ncolor _nkey _nval _nleft _nright _nstruct]" as "Htree_nr".
+                 { iApply (treeR_node_fold (cQp.m 1) Red Leaf k_nr v_nr Leaf
+                     nullptr nullptr _rc nr_ptr).
+                   iSplitR; [ rewrite treeR_leaf _at_as_Rep; done |].
+                   iSplitR; [ rewrite treeR_leaf _at_as_Rep; done |].
+                   rewrite !_at_sep.
+                   iSplitL "_nrc"; [ iExact "_nrc" |].
+                   iSplitL "_ncolor"; [ iExact "_ncolor" |].
+                   iSplitL "_nkey"; [ iExact "_nkey" |].
+                   iSplitL "_nval"; [ iExact "_nval" |].
+                   iSplitL "_nleft"; [ iExact "_nleft" |].
+                   iSplitL "_nright"; [ iExact "_nright" |].
+                   iExact "_nstruct". }
+                 wp_srr_default Black (Node Red Leaf k_nr v_nr Leaf) n_ptr nr_ptr k v l lp rc.
               ** destruct c_rr.
                  --- (* RR rotation *) admit.
                  --- (* default *) admit.
