@@ -460,3 +460,41 @@ fresh `_ntl/_ntr/_n*` don't clash.
 22→15 admits). Remaining: LL/LR ROTATIONS (blocked on Phase D makeCopy) and the
 entire `setRebalanceRight_ok` mirror (which will reuse every tactic/pattern here
 verbatim, left/right swapped).
+
+## PROGRESS 2026-07-10 (session 4): refactor + setRebalanceRight started
+
+Per the "refactor before mirroring" plan, extracted the verbatim-repeated blocks
+into reusable tactics (all validated by rebuild, RebalanceSpec 15→13 admits):
+- `wp_guard_isblack_true np` / `wp_guard_isblack_false np` (RebalanceSpec.v — they
+  name source/is_black_ok/MODULE): the c=Black / c=Red guard openers (enter
+  Sif/Eseqand, eval is_black(n) to true/false, recover node _color/_struct).
+- `wp_srl_default c newLtree np nlp k v r rp rc` / `wp_srr_default c newRtree np
+  nrp k v l lp rc` (Tactics.v): the default no-rotation tail (res=n; res->X=newX;
+  return res; fold Node c … ; discharge Hcont), left / right mirror.
+  Ltac note: pass proof-local Coq vars as args (tactic bodies can't reference
+  them free), and bind introduced names (addr/retp/ret/rx) with `let _ := fresh`.
+
+setRebalanceLeft_ok c=Red & 2b-Black refactored to use them; setRebalanceRight_ok
+c=Red and newR=Node-Black proved via the mirror tactics.
+
+### setRebalanceRight AST body (map_int_int_cpp.v:93926) — confirmed
+NOT a blind left/right swap; read it carefully:
+```
+Sif (Eseqand (is_black n) (is_red newRight))
+  then Sseq [ sub2 = newRight->left;   Sif (is_red sub2) [RL rotation; return] Sskip;
+              sub2 = newRight->right;  Sif (is_red sub2) [RR rotation; return] Sskip ]
+  else Sskip;
+  res = n; res->right = newRight; return res
+```
+KEY: the sub2 read order is **left then right** — SAME as setRebalanceLeft. So
+the DEFAULT (no-rotation) sub-cases ARE close mirrors of the setRebalanceLeft
+ones: identical sub2 field-read order, `is_red(sub2)` checks; only the tail
+(`res->right=newRight`, fold `Node c l k v newRtree`) differs — handled by
+`wp_srr_default`. Remaining setRebalanceRight default cases to do (mirrors of the
+named setRebalanceLeft cases, swap Htree_nl→Htree_nr, nl_ptr→nr_ptr, Hpnl→Hpnr,
+wp_srl_default→wp_srr_default, and the newR subtree in the folds):
+- newR=Leaf  (mirror of 2a);
+- newR=Node Red, both grandchildren Leaf/Black combinations (mirror of the four
+  2b-Red default sub-cases — the sub2=left is the RL check, sub2=right the RR).
+RR/RL ROTATION cases stay blocked on Phase D (makeCopy). RebalanceSpec: 13 admits
+(9 rotations across both fns + a few) remain.
