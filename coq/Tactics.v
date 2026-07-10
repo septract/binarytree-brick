@@ -154,17 +154,25 @@ Ltac wp_unfold_node H :=
 
 (** [wp_unfold_node' H] — robust variant of [wp_unfold_node].
 
-    Uses [treeR_node_unfold] applied to the specific hypothesis [H], instead of
-    a goal-wide [rewrite _at_as_Rep]. Safe when the goal contains competing
-    [as_Rep] terms (other already-reduced [treeR (Node ...)]) — e.g. when
-    unfolding a CHILD node while the parent's fields or a sibling subtree are
-    still in scope. Prefer this inside nested unfolds; [wp_unfold_node] is fine
-    when [H] is the only [treeR (Node ...)] around. *)
+    Unfolds via [iEval (rewrite _at_as_Rep) in H], which rewrites ONLY the named
+    hypothesis [H] (no goal-wide [rewrite _at_as_Rep], hence no occurrence
+    ambiguity), then [iDestruct]s the resulting existential.  This is safe in two
+    situations where [wp_unfold_node] breaks:
+    - the goal contains competing [as_Rep] terms (other already-reduced
+      [treeR (Node ...)]), so the goal-wide rewrite could fire on the wrong one;
+    - [H]'s tree is a FULLY CONCRETE constructor tree, so [treeR] has eagerly
+      reduced all the way to nested [as_Rep] and [treeR_node]/[treeR_node_unfold]
+      (whose LHS still has a [treeR (Node …)] head) no longer syntactically
+      matches.
+    [iEval … in H] handles both because it works on [H]'s current (reduced) form.
+    [wp_unfold_node] is fine when [H] is the only [treeR (Node ...)] and not yet
+    reduced. *)
 Ltac wp_unfold_node' H :=
+  iEval (rewrite _at_as_Rep) in H;
   let lp := fresh "_lp" in
   let rp := fresh "_rp" in
   let rc := fresh "_rc" in
-  iDestruct (treeR_node_unfold with H) as (lp rp rc) "(_ntl & _ntr & _nnode)";
+  iDestruct H as (lp rp rc) "(_ntl & _ntr & _nnode)";
   iDestruct "_nnode" as
     "(_nrc & _ncolor & _nkey & _nval & _nleft & _nright & _nstruct)".
 
