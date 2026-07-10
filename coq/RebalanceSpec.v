@@ -401,7 +401,17 @@ Proof using MOD MODULE.
            destruct l_nl as [| c_ll l_ll k_ll v_ll r_ll].
            ++ (** [newL->left = Leaf] → check LR *)
               destruct r_nl as [| c_rl l_rl k_rl v_rl r_rl].
-              ** (** Both children Leaf → default *)
+              ** (** Both children Leaf → default (no rotation).
+                    The full guard + LL/LR-check proof is worked out and builds up
+                    to the final fold (see docs/notes/2026-07-09_phaseC_rebalance.md):
+                    guard [is_black(n)=true && is_red(newLeft)=true] enters the
+                    rotation body; [is_red(sub2=newLeft->left=null)=false] and
+                    [is_red(sub2=newLeft->right=null)=false] short-circuit both
+                    rotation checks; default path folds [Node Black newL k v r].
+                    The one open step is re-folding [newL = Node Red Leaf .. Leaf]:
+                    the reduced ([as_Rep]) Leaf children don't syntactically frame
+                    against [treeR_node_fold]'s [treeR q Leaf] slots (the CLAUDE.md
+                    [treeR] fixpoint-reduction gotcha — needs the scratch loop). *)
                  admit.
               ** destruct c_rl.
                  --- (** [newL->right = Node Red ...] → LR rotation *)
