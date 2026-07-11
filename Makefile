@@ -47,7 +47,10 @@ COQ_SRCS := $(COQ_DIR)/WpTactics.v \
             $(COQ_DIR)/FindSpec.v \
             $(COQ_DIR)/InsertDefs.v \
             $(COQ_DIR)/InsertSpec.v \
-            $(COQ_DIR)/RebalanceSpec.v \
+            $(COQ_DIR)/IsBlackSpec.v \
+            $(COQ_DIR)/RebalanceDefs.v \
+            $(COQ_DIR)/SetRebalanceLeft.v \
+            $(COQ_DIR)/SetRebalanceRight.v \
             $(COQ_DIR)/InsSpec.v \
             $(COQ_DIR)/RefCount.v \
             $(COQ_DIR)/Invariants.v
@@ -129,9 +132,16 @@ $(COQ_DIR)/InsertSpec.vo: $(COQ_DIR)/InsertSpec.v $(COQ_DIR)/RBTree.vo $(COQ_DIR
 $(COQ_DIR)/IsBlackSpec.vo: $(COQ_DIR)/IsBlackSpec.v $(COQ_DIR)/RBTree.vo $(COQ_DIR)/TreeRep.vo $(COQ_DIR)/Tactics.vo $(COQ_DIR)/InsertDefs.vo
 	$(COQC) $(COQFLAGS) $<
 
-# Phase 5B: setRebalanceLeft_ok + setRebalanceRight_ok
-# (uses the real is_black_ok/is_red_ok from IsBlackSpec, not InsertDefs stubs)
-$(COQ_DIR)/RebalanceSpec.vo: $(COQ_DIR)/RebalanceSpec.v $(COQ_DIR)/InsertDefs.vo $(COQ_DIR)/Tactics.vo $(COQ_DIR)/IsBlackSpec.vo
+# Phase 5B: setRebalanceLeft_ok + setRebalanceRight_ok, split into 3 files for
+# independent/parallel compilation (was the ~70-min monolith RebalanceSpec.v).
+# All use the real is_black_ok/is_red_ok from IsBlackSpec (not InsertDefs stubs).
+$(COQ_DIR)/RebalanceDefs.vo: $(COQ_DIR)/RebalanceDefs.v $(COQ_DIR)/InsertDefs.vo $(COQ_DIR)/Tactics.vo $(COQ_DIR)/IsBlackSpec.vo
+	$(COQC) $(COQFLAGS) $<
+
+$(COQ_DIR)/SetRebalanceLeft.vo: $(COQ_DIR)/SetRebalanceLeft.v $(COQ_DIR)/RebalanceDefs.vo
+	$(COQC) $(COQFLAGS) $<
+
+$(COQ_DIR)/SetRebalanceRight.vo: $(COQ_DIR)/SetRebalanceRight.v $(COQ_DIR)/RebalanceDefs.vo
 	$(COQC) $(COQFLAGS) $<
 
 # Phase 5B: ins_ok (Löb induction, depends on rebalance specs)
@@ -149,7 +159,9 @@ proofs: $(COQ_DIR)/WpTactics.vo \
         $(COQ_DIR)/Tactics.vo $(COQ_DIR)/FindSpec.vo \
         $(COQ_DIR)/InsertDefs.vo $(COQ_DIR)/InsertSpec.vo \
         $(COQ_DIR)/IsBlackSpec.vo \
-        $(COQ_DIR)/RebalanceSpec.vo $(COQ_DIR)/InsSpec.vo \
+        $(COQ_DIR)/RebalanceDefs.vo \
+        $(COQ_DIR)/SetRebalanceLeft.vo $(COQ_DIR)/SetRebalanceRight.vo \
+        $(COQ_DIR)/InsSpec.vo \
         $(COQ_DIR)/RefCount.vo $(COQ_DIR)/Invariants.vo
 
 # ---- Cleanup ----

@@ -30,7 +30,9 @@ FindSpec.v
 InsertDefs.v
 InsertSpec.v
 IsBlackSpec.v
-RebalanceSpec.v
+RebalanceDefs.v
+SetRebalanceLeft.v
+SetRebalanceRight.v
 InsSpec.v
 RefCount.v
 Invariants.v
