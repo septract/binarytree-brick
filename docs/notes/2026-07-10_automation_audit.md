@@ -79,9 +79,75 @@ Measure the compile-time effect on one file before doing all.
 - `is_red_ok` (IsBlackSpec) hand-inlines the operand call at :145 instead of using
   `wp_operand_call_direct1` — reconcile once the merged call tactic exists.
 
-## Sequencing
+## Sequencing (ORIGINAL — dedup-driven; superseded by the re-sequencing below)
 Do **P0 first** (pure win, no lib change, shrinks the slow file, makes Left/Right
 true mirrors → future rebalance edits half the cost). Then **P1** (guard merge +
 call-wrapper tactics) since it removes the largest remaining repetition and every
 future call site benefits. P2/P3 are lower-urgency polish; do P3 (Qed-ification)
 only if per-file compile time still blocks Phase-D work.
+
+## RE-SEQUENCING (2026-07-10): goal is a GENERALLY-REUSABLE tactic library
+Motivation clarified: the point is to push ONE demo application (this RB-tree) all
+the way through and *see where we land on reusability* of the GENERIC layer
+(`WpTactics.v` — usable on any C++/BRiCk code). So rank by GENERALITY, not just
+by dedup within this repo. Two consequences:
+
+- The old **P0** (migrate SetRebalanceLeft) produces ZERO generic assets — it is
+  tree-specific cleanup. Still worth doing, but as a **dogfooding stress-test** of
+  the generic tactics, not the headline.
+- New audit dimension — **hidden hardcoded assumptions**: a tactic may only work
+  because these proofs follow naming conventions (literal Iris hyp names like
+  `"HMOD"`, `"Hpn"`, `"Hcont"`, `"Hargp"`, `"Hstruct"`, or an assumed spec shape).
+  That is fine for the tree-specific layer, but **anything promoted to the generic
+  layer must take hyp names as parameters or use goal-matching — never assume
+  them.** Every generic-layer item below must be checked against this.
+
+Caveat: this repo is currently the ONLY consumer, so "generally usable" is
+aspirational — the proxies are (a) strict no-hardcoded-assumptions discipline in
+`WpTactics.v`, and (b) dogfooding via the tree proofs. Keep the tree migration in
+the loop precisely as that stress-test.
+
+Execution order (generic-library first):
+
+**G1 — `wp_open_func` (generic flagship).** The `func_ok` prologue is byte-identical
+across all 5 `*_ok` proofs and reusable on ANY BRiCk `func_ok` goal. Add
+`wp_open_func <func_def>` to WpTactics.v (Layer 2/3): does `rewrite /func_ok; iSplit;
+[iPureIntro; reflexivity |]; iIntros "!>" (Q vals) "Hspec"; iApply wp_func_intro;
+rewrite /<f>_func /=` and stops before the per-proof spec destructs. Must NOT bake in
+`iPoseProof MODULE as "#HMOD"` (FindSpec has no MODULE) — either omit it (caller adds
+`HMOD` when needed) or provide a `wp_open_func_mod modpf f` variant. Dogfood: drive
+all 5 prologues (InsSpec adds `iLöb` before it). Refs: InsSpec.v:105, InsertSpec.v:63,
+IsBlackSpec.v:18/:127, FindSpec.v:365.
+
+**G2 — consolidate + de-hardcode the generic call machinery.** (a) Lift the shared
+callee-resolution PREFIX (`iApply wp_operand_call; …; iApply wp_operand_cfun2ptr_global;
+iSplitL HMOD; iExists (_global fname); iSplit`) duplicated in `wp_resolve_call`,
+`wp_operand_call_direct1`, `_null`, and inline in IsBlackSpec:145 → one
+`wp_resolve_callee HMOD lookup body fname`. (b) Merge `wp_operand_call_direct1`/`_null`
+(≈40/50 lines shared; differ only in the has_type discharge) via an `ltac:(...)`
+discharge arg. (c) Take `HMOD`/`Hargp` as PARAMETERS (currently hardcoded) so the
+tactics are reusable outside these proofs. Dogfood: reconcile IsBlackSpec `is_red_ok`
+(:145) onto the merged tactic.
+
+**G3 — generic-layer hygiene / layering.** Move `wp_field_to_primR` into WpTactics.v
+(L1 — it is generic but sits in Tactics.v). Fix tree-leaking DOCSTRINGS in WpTactics.v
+(`tptstoR_to_primR`, `wp_eval_ptr_neq_*`) so the generic file reads as generic.
+De-duplicate `wp_step_debug` vs `wp_step` (16 branches hand-synced). A clean,
+correctly-layered `WpTactics.v` IS the reusable product.
+
+**G4 — Qed-backed generic closers (perf + library quality).** Convert closed-goal
+tactics to Qed lemmas: `wp_eval_ptr_neq_null/nonnull`, `wp_eval_int_binop` (one lemma
+param'd by the eval lemma collapses the 4 aliases), the `has_type_or_undef` discharge
+inside `wp_read_local` (30× — high leverage). Measure compile-time effect on one file.
+
+**T1 — tree-specific consolidation (the old P0/P1/P2, now the dogfooding track).**
+Migrate SetRebalanceLeft onto the shared tactics (~245 lines); merge
+`wp_guard_isblack_true/false`; collapse `wp_unfold_node`/`'`/`treeR_node_unfold`
+(have them apply the lemma); derive `treeR_node_valid` from `treeR_node_nonnull`.
+This both cleans the tree layer AND is the primary evidence for whether the generic
+tactics (G1/G2) actually compose.
+
+Rationale: G1–G4 build/validate the reusable deliverable; T1 stresses it by re-using
+it across two mirror proofs. Do G1 first (smallest, highest generality, touches every
+proof file → immediate reuse signal). Each step = one ~30-min validating rebuild of
+the affected file(s); always prototype the tactic in a ~3s scratch first.
