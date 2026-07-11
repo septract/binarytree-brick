@@ -65,3 +65,31 @@ Design to keep statements short: define once
   `proofs` target. `make -jN` then parallelises.
 - ALWAYS iterate new tactics in a ~3 s faithful scratch (RBTree/TreeRep/Tactics
   only), never against the full AST-loaded file.
+
+## STATUS 2026-07-10: Step 1 DONE (file split)
+
+Split committed. Both SetRebalanceLeft.v and SetRebalanceRight.v compile clean
+(0 errors, all 7 default cases each). Measured: ~31 min CPU (`user`) per file;
+run concurrently they overlap (~40 min wall each under core contention) instead
+of serialising to one ~70-min file. Key wins realised NOW:
+- **incremental**: editing one rebalance fn recompiles only its file (the other's
+  .vo is cached);
+- **parallel**: `make -jN` builds the two proof files at once (no dep between
+  them; both only depend on RebalanceDefs.vo);
+- **isolation**: a syntax/proof error is confined to one file.
+
+`abstract` was verified to work in Iris proof mode but is NOT used — it doesn't
+cut wall-time (same work, one process) and doesn't give incremental rebuild;
+separate .vo files are what deliver "replay on demand".
+
+### Still available if a rebalance file needs to get faster (Steps 2 & 3)
+Each file is still one ~31-min lemma internally. If iterating on rotation cases
+(Phase D) makes that painful:
+- **Step 2 (per-case top-level lemmas):** factor each case into its own Lemma
+  (goal captured via the ~11s prologue idtac-dump) so cases compile in isolation
+  & in parallel. More design (statement writing) but max granularity.
+- **Step 3 (Qed-backed tails):** convert wp_srl_default/wp_srr_default and the
+  guard openers from INLINING Ltac (large term at each of 35 sites) into
+  Qed-backed lemmas applied once — shrinks each proof term; measure the effect.
+Do these only when the per-file time actually blocks work; the split already
+removed the cross-lemma recompilation tax that was the immediate pain.
