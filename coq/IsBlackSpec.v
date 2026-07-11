@@ -15,11 +15,7 @@ Hypothesis MODULE : |-- denoteModule source.
 Lemma is_black_ok :
   |-- func_ok source is_black_func is_black_spec.
 Proof using MOD MODULE.
-  rewrite /func_ok. iSplit.
-  - iPureIntro. reflexivity.
-  - iIntros "!>" (Q vals) "Hspec".
-    iPoseProof MODULE as "#HMOD".
-    iApply wp_func_intro.
+  wp_open_func_mod MODULE.
     rewrite /is_black_func /=.
     iDestruct "Hspec" as (pn vn) "(%Hvals & Hpn & Hspec)".
     subst vals. simpl.
@@ -124,11 +120,7 @@ Qed.
 Lemma is_red_ok :
   |-- func_ok source is_red_func is_red_spec.
 Proof using MOD MODULE.
-  rewrite /func_ok. iSplit.
-  - iPureIntro. reflexivity.
-  - iIntros "!>" (Q vals) "Hspec".
-    iPoseProof MODULE as "#HMOD".
-    iApply wp_func_intro.
+  wp_open_func_mod MODULE.
     rewrite /is_red_func /=.
     iDestruct "Hspec" as (pn vn) "(%Hvals & Hpn & Hspec)".
     subst vals. simpl.

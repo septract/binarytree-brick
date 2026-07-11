@@ -60,11 +60,7 @@ Hypothesis MODULE : |-- denoteModule source.
 Lemma insert_ok :
   |-- func_ok source insert_func insert_spec.
 Proof using MOD MODULE.
-  rewrite /func_ok. iSplit.
-  - iPureIntro. reflexivity.
-  - iIntros "!>" (Q vals) "Hspec".
-    iPoseProof MODULE as "#HMOD".
-    iApply wp_func_intro.
+  wp_open_func_mod MODULE.
     rewrite /insert_func /=.
     (** Extract args: k, v, n from spec. *)
     iDestruct "Hspec" as (pk vk pn vn pn0 vn0) "(%Hvals & Hpk & Hpv & Hpn & Hspec)".

@@ -1238,6 +1238,39 @@ Ltac wp_operand_call_direct1_null HMOD lookup body fname fok func_def H_local H_
     pass finds the wp rule.
 *)
 
+(** [wp_open_func] — open a [|-- func_ok tu f spec] goal.
+
+    Runs the verbatim prologue shared by every [*_ok] refinement proof:
+<<
+      rewrite /func_ok; iSplit;
+      [ iPureIntro; reflexivity
+      | iIntros "!>" (Q vals) "Hspec"; iApply wp_func_intro ]
+>>
+    and leaves the goal at [wp tu (bind_vars … body) K] with [Hspec] holding the
+    (still-folded) spec.  GENERIC: mentions only [func_ok]/[wp_func_intro] (BRiCk),
+    no tree/module specifics — it hardcodes no hypothesis names beyond the fresh
+    [Q]/[vals]/["Hspec"] it introduces.
+
+    The caller then does the function-specific + spec-specific steps that genuinely
+    vary per proof: [rewrite /<f>_func /=], the two [iDestruct "Hspec" as (…)]
+    argument/ghost destructs, and (when the proof resolves calls)
+    [iPoseProof MODULE as "#HMOD"] — see [wp_open_func_mod] for the last. *)
+Ltac wp_open_func :=
+  rewrite /func_ok; iSplit;
+  [ iPureIntro; reflexivity
+  | iIntros "!>" (Q vals) "Hspec"; iApply wp_func_intro ].
+
+(** [wp_open_func_mod modpf] — like [wp_open_func] but also introduces the
+    persistent module fact [HMOD] from a [|-- denoteModule tu] proof [modpf].
+    Use in proofs that resolve C++ calls (they need [HMOD]); [wp_open_func] alone
+    suffices for call-free proofs (e.g. findNode). *)
+Ltac wp_open_func_mod modpf :=
+  rewrite /func_ok; iSplit;
+  [ iPureIntro; reflexivity
+  | iIntros "!>" (Q vals) "Hspec";
+    iPoseProof modpf as "#HMOD";
+    iApply wp_func_intro ].
+
 Ltac wp_step :=
   first [
     (* 1. Statement-level wp rules *)

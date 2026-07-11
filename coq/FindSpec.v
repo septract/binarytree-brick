@@ -362,11 +362,7 @@ Ltac findNode_after_outer_eval cv tc k n q t :=
 Lemma findNode_ok :
   |-- func_ok source findNode_func findNode_spec.
 Proof using MOD.
-  rewrite /func_ok.
-  iSplit.
-  - iPureIntro. reflexivity.
-  - iIntros "!>" (Q vals) "Hspec".
-    iApply wp_func_intro.
+  wp_open_func.
     (** Simplify: expose bind_vars + wp body.
         [findNode_func] is extracted from the symbol table, so [/=] must
         compute through the match on [source.(symbols) !! findNode_name].

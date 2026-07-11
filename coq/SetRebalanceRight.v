@@ -24,11 +24,7 @@ Hypothesis MODULE : |-- denoteModule source.
 Lemma setRebalanceRight_ok :
   |-- func_ok source setRebalanceRight_func setRebalanceRight_spec.
 Proof using MOD MODULE.
-  rewrite /func_ok. iSplit.
-  - iPureIntro. reflexivity.
-  - iIntros "!>" (Q vals) "Hspec".
-    iPoseProof MODULE as "#HMOD".
-    iApply wp_func_intro.
+  wp_open_func_mod MODULE.
     rewrite /setRebalanceRight_func /=.
     (** Extract args: n, newRight *)
     iDestruct "Hspec" as (pn vn pnr vnr)

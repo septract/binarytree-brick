@@ -24,11 +24,7 @@ Hypothesis MODULE : |-- denoteModule source.
 Lemma setRebalanceLeft_ok :
   |-- func_ok source setRebalanceLeft_func setRebalanceLeft_spec.
 Proof using MOD MODULE.
-  rewrite /func_ok. iSplit.
-  - iPureIntro. reflexivity.
-  - iIntros "!>" (Q vals) "Hspec".
-    iPoseProof MODULE as "#HMOD".
-    iApply wp_func_intro.
+  wp_open_func_mod MODULE.
     rewrite /setRebalanceLeft_func /=.
     (** Step 1: Extract argument bindings.
         Two args (n, newLeft) → 4 existentials for physical pairs. *)

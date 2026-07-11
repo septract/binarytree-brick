@@ -151,3 +151,24 @@ Rationale: G1–G4 build/validate the reusable deliverable; T1 stresses it by re
 it across two mirror proofs. Do G1 first (smallest, highest generality, touches every
 proof file → immediate reuse signal). Each step = one ~30-min validating rebuild of
 the affected file(s); always prototype the tactic in a ~3s scratch first.
+
+## EXECUTION LOG
+
+### G1 — wp_open_func: DONE (pending final rebalance rebuild confirm)
+Added `wp_open_func` and `wp_open_func_mod modpf` to WpTactics.v (Layer 3, generic
+— only [func_ok]/[wp_func_intro], no hardcoded hyp names beyond the fresh
+Q/vals/"Hspec" it introduces). Migrated 6 proofs' prologues:
+- FindSpec (`wp_open_func`, no MODULE) ✓ 0 err
+- IsBlackSpec is_black_ok + is_red_ok (`wp_open_func_mod MODULE`) ✓ 0 err
+- InsertSpec (`wp_open_func_mod MODULE`) ✓ 0 err
+- SetRebalanceLeft / SetRebalanceRight (`wp_open_func_mod MODULE`) — rebuild pending
+InsSpec left as-is: its `iLöb as "IH"` sits between the iSplit bullet and iIntros,
+so it doesn't fit the bundled tactic; a `wp_open_func_lob` variant could cover it
+later (InsSpec is WIP/Admitted anyway).
+
+**BUILD-RACE LESSON:** never run two `coqc` builds concurrently by hand when they
+share/overwrite `.vo` files — I kicked off SRL/SRR while the fast-files chain was
+still rewriting IsBlackSpec.vo, giving "inconsistent assumptions over library" and
+a half-written .vo. Use `make -jN` (which orders by deps) for parallelism, or run
+manual builds strictly serially. After a race, rebuild the chain serially to
+recover.
