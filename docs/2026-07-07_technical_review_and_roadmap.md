@@ -2,6 +2,14 @@
 
 *Date: 2026-07-07*
 
+> **Snapshot note (2026-07-12).** This is a dated review; the *rationale and
+> dependency graph* below are still current, but the concrete file list and
+> per-file status have moved on. Notably `RebalanceSpec.v` has since been split
+> into `RebalanceDefs.v` + `SetRebalanceLeft.v` + `SetRebalanceRight.v` (for
+> build performance), and the no-rotation cases of both rebalance functions are
+> now proved. For the live status and "start here" pointer, read `TODO.md`
+> (top section) and `README.md`'s proof-status table first.
+
 A soundness/structure review of the Rocq proof development, plus a roadmap to
 a complete proof of the Daedalus C++ red-black tree (`cpp/ddl/map.h`).
 

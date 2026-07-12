@@ -8,6 +8,36 @@ Status legend: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked
 
 ---
 
+## Current state / START HERE  (updated 2026-07-12)
+
+**Done & machine-checked:** functional model (`RBTree.v`), `treeR` (`TreeRep.v`),
+`findNode_ok` (full spec), `insert_ok` (modulo `ins_ok`), `is_black_ok`/`is_red_ok`,
+and **all no-rotation cases of both `setRebalanceLeft_ok` and `setRebalanceRight_ok`**.
+Both BRiCk framework gaps are closed — trusted base is the single sound axiom
+`align_of_function` (`WpTactics.v`); `findNode_ok` depends on neither gap.
+
+**The two live fronts a new agent can pick up:**
+
+1. **Phase D — copy-on-write + ref-count ghost state** (`RefCount.v` is prose-only).
+   This is the real gate: it unblocks the 9 remaining rebalance ROTATION admits
+   (C1c/C1d/C1e), `ins_ok` (Phase E), and memory safety (Phase F). Highest value,
+   highest design risk. Start at **D1a** (ownership-model decision). Everything
+   downstream of it is currently `[!]` blocked.
+
+2. **Automation-library extraction** (see the "Automation library" section + the
+   `docs/notes/2026-07-10_automation_audit.md` plan). G1 done; **G2** (consolidate
+   + de-hardcode the call machinery) is next. Independent of Phase D; good for a
+   session that wants a bounded, low-design-risk task.
+
+**Build reality:** the AST `.vo` loads in ~5s but the write-path proof files are
+slow to *check* — `insert_ok` and each `SetRebalance*` file ~20–35 min. NEVER
+iterate a tactic against them; use a ~3s faithful scratch (RBTree/TreeRep/Tactics
+only). Full build workflow + gotchas: `CLAUDE.md`. Per-topic working notes:
+`docs/notes/2026-07-*.md`. Detailed soundness review + phased rationale:
+`docs/2026-07-07_technical_review_and_roadmap.md`.
+
+---
+
 ## Done (do not regress)
 
 - [x] Functional model `RBTree.v` — `ins`/`insert`/`findNode`, `IsBST`/`NoRedRed`
@@ -84,26 +114,43 @@ Smallest real callees; validate the call machinery.
       (name inferred from the goal, not the folded `is_black_name`) →
       `wp_call_direct` with `is_black_ok`; then `Eunop Unot` via `eval_not_bool`.
       `negb (is_black …)` reduces to the `is_red` postcondition literal.
-- [ ] **B1c** Factor shared tactics into the library: (a) an operand-context
-      direct-call resolver (the `wp_resolve_call` variant that infers the callee
-      name — `wp_resolve_call` forces the folded name and fails here); (b) the
-      `Cintegral`+bool-`Beq` compare; (c) generic `wp_open_func` prologue. Extract
-      once a 2nd same-shape use lands (per CLAUDE.md).
+- [x] **B1c** Factor shared tactics into the library — LARGELY DONE:
+      (a) operand-context direct-call resolver → `wp_operand_call_direct1` +
+      `wp_operand_call_direct1_null` (`WpTactics.v`); (c) generic `wp_open_func` /
+      `wp_open_func_mod` prologue (`WpTactics.v`, drives all non-Löb `*_ok`
+      proofs). (b) the `Cintegral`+bool-`Beq` compare is still inline in
+      IsBlackSpec — minor, not yet lifted. See the automation-library section
+      below for the ongoing extraction work.
 
 ## Phase C — Rotations  (depends: B1; rotation bodies also need D1)
 
-Fill in `RebalanceSpec.v` (currently 20 `admit`s, scaffold complete).
+**Split for build performance** (2026-07-10): the former monolithic
+`RebalanceSpec.v` (~70-min `coqc` recheck) is now 3 files —
+`RebalanceDefs.v` (shared pure lemmas + guard-opener tactics),
+`SetRebalanceLeft.v`, `SetRebalanceRight.v` — that compile independently and in
+parallel (`make -j`). See `docs/notes/2026-07-10_rebalance_perf_plan.md`.
 
-- [ ] **C1a** `setRebalanceLeft_ok`: handle `Eseqand` short-circuit for the
-      `is_black(n) && is_red(newLeft)` guard.
-- [ ] **C1b** Prove the **default / no-rotation** cases first (need only B1,
-      no `makeCopy`): `c=Red`; `newL=Leaf`; `newL=Node Black …`;
-      `newL=Node Red (non-Red) _ (non-Red)`.
-- [ ] **C1c** LL rotation case (copies `sub2` → needs D1).
-- [ ] **C1d** LR rotation case (copies `sub2` → needs D1).
-- [ ] **C1e** `setRebalanceRight_ok`: mirror of C1a–C1d (RL/RR).
-- [ ] **C1f** Establish reusable tactics for in-place field writes
-      (`n->left = …`, `n->color = black`) in `Tactics.v`.
+- [x] **C1a** `Eseqand` guard (`is_black(n) && is_red(newLeft/Right)`) handling —
+      DONE. Verified-callee calls in test position: `wp_if` → `wp_operand_seqand`
+      → `wp_operand_call_direct1(_null)`, short-circuit, `Sif` else. Encapsulated
+      in the `wp_guard_isblack_true/false` tactics (`RebalanceDefs.v`).
+- [x] **C1b** ALL default / no-rotation cases of BOTH `setRebalanceLeft_ok` and
+      `setRebalanceRight_ok` — DONE (`Qed`-clean for those branches). 7 cases each:
+      `c=Red`; `c=Black,newL=Leaf`; `c=Black,newL=Node Black`; and the four
+      `c=Black,newL=Node Red …` non-rotating sub-cases (Leaf/Black × Leaf/Black
+      children). Needed only B1 (no `makeCopy`). Key techniques + the full worked
+      sequences are in `docs/notes/2026-07-09_phaseC_rebalance.md`.
+- [!] **C1c** LL rotation case — BLOCKED on D1 (`makeCopy` copies `sub2`). `admit`.
+- [!] **C1d** LR rotation case — BLOCKED on D1. `admit`.
+- [!] **C1e** `setRebalanceRight_ok` RL/RR rotations — BLOCKED on D1. `admit`.
+      (Its default cases ARE done; only the rotation branches remain.)
+- [x] **C1f** Reusable field-write / node-fold / call tactics — DONE and used:
+      `wp_srl_default`/`wp_srr_default` (default tails, `Tactics.v`),
+      `wp_operand_call_direct1(_null)`, `wp_unfold_node'`, `treeR_node_unfold`
+      (all `WpTactics.v`/`Tactics.v`).
+
+Remaining Phase-C admits (9 total across the two files) are EXACTLY the LL/LR/RL/RR
+rotation cases — all gated on Phase D.
 
 ## Phase D — Copy-on-write + ref-count model  `[!]` design-gated, high risk
 
@@ -197,6 +244,50 @@ Independent of the write-path; improves *what the connected specs actually say*.
 
 - **Delete.** The Daedalus C++ has no delete operation. The Lean `DoubleBlack`
   deletion model is a companion experiment, not needed for C++ verification.
+
+---
+
+## Automation library  (goal: a generally-reusable generic layer)
+
+Motivation: push this one RB-tree demo all the way through and see where we land
+on reusability of the GENERIC layer (`WpTactics.v` — usable on any C++/BRiCk code).
+`Tactics.v` = tree-specific; `RebalanceDefs.v` = rebalance-specific. Full audit +
+ranked plan + execution log: **`docs/notes/2026-07-10_automation_audit.md`** (read
+this before doing library work). Sequencing there is generic-library-first (G1–G4),
+with the tree cleanup (T1) as the dogfooding stress-test.
+
+- [x] **G1** `wp_open_func` / `wp_open_func_mod` (generic `func_ok` prologue) —
+      DONE; migrated FindSpec, IsBlackSpec (×2), InsertSpec, SetRebalanceLeft/Right.
+      (`InsSpec` left as-is: its `iLöb` doesn't fit the bundle; a
+      `wp_open_func_lob` variant could cover it later.)
+- [ ] **G2** Consolidate + DE-HARDCODE the generic call machinery: lift the shared
+      callee-resolution prefix (duplicated across `wp_resolve_call` /
+      `wp_operand_call_direct1` / `_null` / inline in IsBlackSpec); merge
+      `wp_operand_call_direct1`/`_null` (≈40/50 lines shared, differ only in the
+      has_type discharge); parameterize the hardcoded `"HMOD"`/`"Hargp"` names so
+      the tactics are reusable off this codebase. **Trickiest — touches machinery
+      every proof relies on.**
+- [ ] **G3** Generic-layer hygiene: move `wp_field_to_primR` into `WpTactics.v`
+      (it's generic but sits in `Tactics.v`); fix tree-leaking docstrings in
+      `WpTactics.v`; de-duplicate `wp_step_debug` vs `wp_step`.
+- [ ] **G4** Qed-backed generic closers to shrink proof terms + compile time:
+      `wp_eval_ptr_neq_null/nonnull`, `wp_eval_int_binop` (one lemma collapses the
+      4 aliases), the `has_type_or_undef` discharge inside `wp_read_local` (30×).
+      Measure the effect on one file first.
+- [ ] **T1** Tree-specific consolidation (dogfooding for G2): merge
+      `wp_guard_isblack_true/false` into one color/bool-param'd tactic; collapse
+      `wp_unfold_node`/`wp_unfold_node'`/`treeR_node_unfold`; derive
+      `treeR_node_valid` from `treeR_node_nonnull`. (Note: SetRebalanceLeft was
+      already migrated onto the shared tactics during Phase C — the un-refactored
+      state the audit found is now fixed.)
+
+**Library-work discipline** (learned the hard way): (1) prototype every tactic in
+a ~3s faithful scratch (imports RBTree/TreeRep/Tactics only — NOT the AST) before
+touching a 30-min proof file; (2) never run two `coqc` builds concurrently by hand
+if they share `.vo` — use `make -jN` (dep-ordered) or run serially, else you get
+"inconsistent assumptions over library" and half-written `.vo`; (3) changing
+`WpTactics.v` invalidates the whole `.vo` chain — rebuild `Tactics`/`InsertDefs`/
+`RebalanceDefs` before the proof files.
 
 ---
 

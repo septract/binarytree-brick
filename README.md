@@ -43,7 +43,9 @@ proved to preserve the red-black invariants.
 │   ├── InsertDefs.v            #   AST function extractions + specs (cached layer)
 │   ├── InsertSpec.v            #   insert refinement proof
 │   ├── IsBlackSpec.v           #   is_black / is_red leaf-callee proofs (complete)
-│   ├── RebalanceSpec.v         #   setRebalanceLeft/Right proofs (WIP)
+│   ├── RebalanceDefs.v         #   shared rebalance lemmas + guard-opener tactics
+│   ├── SetRebalanceLeft.v      #   setRebalanceLeft_ok (default cases done; rotations admit)
+│   ├── SetRebalanceRight.v     #   setRebalanceRight_ok (default cases done; rotations admit)
 │   ├── InsSpec.v               #   ins proof via Löb induction (WIP)
 │   ├── RefCount.v              #   reference-counting correctness (ghost state)
 │   └── Invariants.v            #   end-to-end glue proofs
@@ -88,9 +90,10 @@ The refinement proof proper. It follows a standard strategy:
    `NoRedRed`, etc., with their invariant-preservation lemmas.
 2. **Representation predicate** (`TreeRep.v`) — links the Rocq `tree` type to
    the C++ `Node` heap layout via BRiCk separation-logic assertions (`treeR`).
-3. **Refinement proofs** (`FindSpec.v`, `InsertSpec.v`, `RebalanceSpec.v`,
-   `InsSpec.v`, `RefCount.v`) — each C++ function is shown to refine its
-   functional counterpart via a Hoare triple / weakest-precondition proof.
+3. **Refinement proofs** (`FindSpec.v`, `InsertSpec.v`, `IsBlackSpec.v`,
+   `SetRebalanceLeft.v`, `SetRebalanceRight.v`, `InsSpec.v`, `RefCount.v`) — each
+   C++ function is shown to refine its functional counterpart via a Hoare triple /
+   weakest-precondition proof.
 4. **Glue** (`Invariants.v`) — composes the refinement and functional-invariant
    proofs toward end-to-end correctness.
 
@@ -133,8 +136,10 @@ are gitignored.
 | `findNode` refinement (full: returns node holding the key/value) | `coq/FindSpec.v` | ✅ Complete — 0 `admit` |
 | `insert` top-level refinement | `coq/InsertSpec.v` | 🟡 `insert_ok` proved modulo admitted callees |
 | `is_black` / `is_red` refinement | `coq/IsBlackSpec.v` | ✅ Complete — both `Qed`, 0 `admit` |
-| `setRebalanceLeft/Right` | `coq/RebalanceSpec.v` | 🟠 WIP — contains `admit`s |
-| `ins` (Löb induction) | `coq/InsSpec.v` | 🟠 WIP — contains `admit`s |
+| `setRebalanceLeft` | `coq/SetRebalanceLeft.v` | 🟡 all no-rotation cases proved; LL/LR rotations `admit` (need Phase D) |
+| `setRebalanceRight` | `coq/SetRebalanceRight.v` | 🟡 all no-rotation cases proved; RL/RR rotations `admit` (need Phase D) |
+| Rebalance shared defs/tactics | `coq/RebalanceDefs.v` | ✅ Complete |
+| `ins` (Löb induction) | `coq/InsSpec.v` | 🟠 WIP — prologue only, rest `admit` |
 | Reference counting | `coq/RefCount.v` | 🔲 Scaffolded (ghost state, Phase 6) |
 | End-to-end glue | `coq/Invariants.v` | 🔲 Scaffolded |
 
